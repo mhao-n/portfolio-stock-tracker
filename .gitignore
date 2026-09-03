@@ -1,0 +1,12 @@
+node_modules
+.env
+dist
+.DS_Store
+
+# Local/private portfolio data
+backend/src/portfolio.json
+backend/src/settings.json
+backend/src/snapshots.json
+
+# Machine-specific launch scripts with local Windows paths
+Start-App.bat

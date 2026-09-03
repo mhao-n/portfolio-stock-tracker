@@ -1,0 +1,17 @@
+[
+  {
+    "symbol": "AAPL",
+    "shares": 10,
+    "avgCost": 180
+  },
+  {
+    "symbol": "MSFT",
+    "shares": 5,
+    "avgCost": 390
+  },
+  {
+    "symbol": "VOO",
+    "shares": 3,
+    "avgCost": 500
+  }
+]
