@@ -5,7 +5,7 @@ import { BarChart3, BriefcaseBusiness, CalendarDays, Command, Download, Edit3, E
 import './style.css';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
-const COLORS = ['#4f7cff', '#72e6a5', '#ffcf5a', '#ff8e8e', '#b38cff', '#5eead4', '#f59e0b', '#93c5fd'];
+const COLORS = ['var(--blue)', 'var(--green)', 'var(--warning)', 'var(--red)', 'var(--purple)', 'var(--teal)', 'var(--orange)', 'var(--text-soft)'];
 const SORT_OPTIONS = [
   { value: 'value', label: 'Position value' },
   { value: 'price', label: 'Stock price' },
@@ -441,8 +441,8 @@ function HoldingCard({ holding, onDelete, onUpdate, pinned, onTogglePin }) {
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="date" minTickGap={38} />
           <YAxis domain={['auto', 'auto']} width={64} />
-          <Tooltip formatter={(v) => money(v)} />
-          <Area type="monotone" dataKey="close" strokeWidth={2} fillOpacity={0.18} />
+          <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(v) => money(v)} />
+          <Area type="monotone" dataKey="close" stroke="var(--blue)" fill="var(--blue)" strokeWidth={2} fillOpacity={0.10} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -549,9 +549,9 @@ function PortfolioSnapshotPanel({ snapshots = [] }) {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" minTickGap={32} />
             <YAxis tickFormatter={compactMoney} width={72} />
-            <Tooltip formatter={(value, name) => [money(value), name]} />
-            <Area type="monotone" dataKey="totalValue" name="Total value" stroke="#72e6a5" fill="#72e6a5" fillOpacity={0.18} strokeWidth={2} />
-            <Area type="monotone" dataKey="holdingsValue" name="Holdings value" stroke="#4f7cff" fill="#4f7cff" fillOpacity={0.10} strokeWidth={2} />
+            <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(value, name) => [money(value), name]} />
+            <Area type="monotone" dataKey="totalValue" name="Total value" stroke="var(--green)" fill="var(--green)" fillOpacity={0.18} strokeWidth={2} />
+            <Area type="monotone" dataKey="holdingsValue" name="Holdings value" stroke="var(--blue)" fill="var(--blue)" fillOpacity={0.10} strokeWidth={2} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -561,7 +561,7 @@ function PortfolioSnapshotPanel({ snapshots = [] }) {
 
 function BenchmarkPanel({ dashboard, benchmarks, loading, error, onRefresh }) {
   const benchmarkRows = benchmarks?.benchmarks || [];
-  const colors = ['#72e6a5', '#4f7cff', '#ffcf5a', '#b38cff'];
+  const colors = ['var(--green)', 'var(--blue)', 'var(--warning)', 'var(--purple)'];
   const baseHistory = benchmarkRows[0]?.history?.slice(-90) || [];
   const portfolioSnapshots = (dashboard?.snapshots || []).slice(-90).filter(row => Number(row.totalValue || 0) > 0);
   const portfolioFirst = portfolioSnapshots[0]?.totalValue;
@@ -612,8 +612,8 @@ function BenchmarkPanel({ dashboard, benchmarks, loading, error, onRefresh }) {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" minTickGap={28} />
             <YAxis tickFormatter={value => `${Number(value).toFixed(0)}%`} width={56} />
-            <Tooltip formatter={(value, name) => [`${Number(value).toFixed(2)}%`, name]} />
-            <Area type="monotone" dataKey="Portfolio" name="Portfolio" stroke="#ff8e8e" fill="#ff8e8e" fillOpacity={0.08} strokeWidth={2} connectNulls />
+            <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, name]} />
+            <Area type="monotone" dataKey="Portfolio" name="Portfolio" stroke="var(--red)" fill="var(--red)" fillOpacity={0.08} strokeWidth={2} connectNulls />
             {benchmarkRows.map((benchmark, index) => (
               <Area key={benchmark.symbol} type="monotone" dataKey={benchmark.symbol} name={benchmark.symbol} stroke={colors[index % colors.length]} fill={colors[index % colors.length]} fillOpacity={0.10} strokeWidth={2} connectNulls />
             ))}
@@ -732,7 +732,7 @@ function BreakdownTab({ dashboard }) {
                 <Pie data={allocation} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={2}>
                   {allocation.map(item => <Cell key={item.name} fill={item.color} />)}
                 </Pie>
-                <Tooltip formatter={(v) => money(v)} />
+                <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(v) => money(v)} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -763,7 +763,7 @@ function BreakdownTab({ dashboard }) {
                 <Pie data={sectorAllocation} dataKey="value" nameKey="name" innerRadius={58} outerRadius={92} paddingAngle={2}>
                   {sectorAllocation.map(item => <Cell key={item.name} fill={item.color} />)}
                 </Pie>
-                <Tooltip formatter={(v) => money(v)} />
+                <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(v) => money(v)} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -806,8 +806,8 @@ function BreakdownTab({ dashboard }) {
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="label" />
             <YAxis width={78} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
-            <Tooltip formatter={(v) => money(v)} />
-            <Area type="monotone" dataKey="value" strokeWidth={2} fillOpacity={0.18} />
+            <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(v) => money(v)} />
+            <Area type="monotone" dataKey="value" stroke="var(--blue)" fill="var(--blue)" strokeWidth={2} fillOpacity={0.10} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -957,9 +957,9 @@ function EarningsHistoryCharts({ rows }) {
               <XAxis dataKey="date" minTickGap={16} />
               <YAxis yAxisId="left" tickFormatter={compactMoney} width={58} />
               <YAxis yAxisId="right" orientation="right" width={36} />
-              <Tooltip formatter={(value, name) => [name === 'revenue' ? compactMoney(value) : num(value, 2), name]} />
-              <Area yAxisId="left" type="monotone" dataKey="revenue" name="revenue" stroke="#4f7cff" fill="#4f7cff" fillOpacity={0.18} strokeWidth={2} />
-              <Area yAxisId="right" type="monotone" dataKey="eps" name="eps" stroke="#72e6a5" fill="#72e6a5" fillOpacity={0.10} strokeWidth={2} />
+              <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(value, name) => [name === 'revenue' ? compactMoney(value) : num(value, 2), name]} />
+              <Area yAxisId="left" type="monotone" dataKey="revenue" name="revenue" stroke="var(--blue)" fill="var(--blue)" fillOpacity={0.18} strokeWidth={2} />
+              <Area yAxisId="right" type="monotone" dataKey="eps" name="eps" stroke="var(--green)" fill="var(--green)" fillOpacity={0.10} strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </div>;
@@ -1106,7 +1106,7 @@ function App() {
   const [holdingSearch, setHoldingSearch] = useState('');
   const [pinnedSymbols, setPinnedSymbols] = useState(() => storageJson('pinnedHoldings', []));
   const [cashForm, setCashForm] = useState('');
-  const [theme, setTheme] = useState(() => storageValue('theme', 'dark'));
+  const [theme, setTheme] = useState(() => storageValue('theme', window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') === 'light' ? 'light' : 'dark');
   const [sortBy, setSortBy] = useState('value');
   const [sortDir, setSortDir] = useState('desc');
   const [sortOpen, setSortOpen] = useState(false);
@@ -1373,11 +1373,11 @@ function App() {
     <header className="app-header">
       <div>
         <p className="eyebrow">Portfolio Stock Tracker</p>
-        <h1>Portfolio Dashboard</h1>
+        <h1>Your portfolio</h1>
       </div>
       <div className="header-actions">
         <button onClick={() => setCommandOpen(true)} title="Open command palette"><Command size={18}/> Commands</button>
-        <button onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} title="Toggle theme">
+        <button onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} title="Toggle theme" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
           {theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>} {theme === 'dark' ? 'Light' : 'Dark'}
         </button>
         <input ref={importInputRef} className="file-input" type="file" accept=".json,application/json" onChange={importJson} />
@@ -1405,9 +1405,9 @@ function App() {
     </section>
 
     <form className="add-form" onSubmit={addHolding}>
-      <input placeholder="Ticker e.g. TSLA" value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}/>
-      <input placeholder="Shares" type="number" step="any" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })}/>
-      <input placeholder="Average cost" type="number" step="any" value={form.avgCost} onChange={e => setForm({ ...form, avgCost: e.target.value })}/>
+      <input aria-label="Ticker symbol" placeholder="Ticker e.g. TSLA" value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}/>
+      <input aria-label="Shares" placeholder="Shares" type="number" step="any" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })}/>
+      <input aria-label="Average cost" placeholder="Average cost" type="number" step="any" value={form.avgCost} onChange={e => setForm({ ...form, avgCost: e.target.value })}/>
       <button><Plus size={18}/> Add / Update</button>
     </form>
 
