@@ -52,7 +52,7 @@ portfolio-stock-tracker/
 
 ## Editing your starting portfolio manually
 
-For a fresh local setup, create your private portfolio file from the example:
+For a fresh local setup, create your portfolio file from the example:
 
 ```text
 backend/src/portfolio.example.json -> backend/src/portfolio.json
@@ -75,28 +75,10 @@ Example:
 
 You can also add/update/remove holdings in the website UI.
 
-## Privacy note
+## Local data
 
-This repo is set up so personal files are ignored by Git:
-
-```text
-backend/src/portfolio.json
-backend/src/settings.json
-backend/src/snapshots.json
-Start-App.bat
-```
-
-Only the `.example` files are meant to be shared publicly.
+The backend stores holdings in `backend/src/portfolio.json`, settings in `backend/src/settings.json`, and portfolio history in `backend/src/snapshots.json`. These local files and the machine-specific `Start-App.bat` launcher are excluded from Git. The repository includes `.example` files for setting up a new installation.
 
 ## Notes about predictions
 
 The prediction is intentionally simple: it uses the last ~45 trading days and fits a basic linear trend forward 7 days. It is useful as a demo feature, but it should not be used to make investment decisions.
-
-Better future upgrades:
-
-- Store users and portfolios in SQLite/Postgres
-- Add login/authentication
-- Use a paid data API with stable terms
-- Add earnings transcripts/news sentiment
-- Add risk metrics like beta-weighted exposure, sector allocation, drawdown, Sharpe ratio
-- Deploy frontend to Vercel and backend to Render/Fly.io/Railway
