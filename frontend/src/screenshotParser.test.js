@@ -151,3 +151,16 @@ test("valid symbols that resemble headings can still be imported", () => {
     [[]],
   );
 });
+
+test("extracts cost-only tables and mobile cards for combining with quantity screenshots", () => {
+  const data = table(["Symbol", "Average Cost"], [["AAPL", "$150.00"]]);
+  for (const result of [
+    extractHoldings(data),
+    extractHoldings("AAPL\nAverage cost: $150.00"),
+  ]) {
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.rows[0].symbol, "AAPL");
+    assert.equal(result.rows[0].shares, "");
+    assert.equal(result.rows[0].avgCost, "150");
+  }
+});

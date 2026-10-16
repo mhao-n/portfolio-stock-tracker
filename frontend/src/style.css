@@ -1399,3 +1399,10 @@ summary:focus-visible {
   .screenshot-footer { flex-wrap: wrap; }
   .screenshot-footer button { flex: 1; }
 }
+
+.screenshot-batch { display: grid; gap: 12px; }
+.screenshot-file { padding: 12px; border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.screenshot-file-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; overflow-wrap: anywhere; }
+.screenshot-file-heading > div { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.screenshot-file details { margin-top: 10px; }
+@media (max-width: 600px) { .screenshot-file-heading { align-items: flex-start; flex-wrap: wrap; } }

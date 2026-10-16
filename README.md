@@ -79,11 +79,13 @@ You can also add/update/remove holdings in the website UI.
 
 The backend stores holdings in `backend/src/portfolio.json`, settings in `backend/src/settings.json`, and portfolio history in `backend/src/snapshots.json`. These local files and the machine-specific `Start-App.bat` launcher are excluded from Git. The repository includes `.example` files for setting up a new installation.
 
-## Importing a portfolio screenshot
+## Importing portfolio screenshots
 
-Choose **Manage → Import screenshot**, then paste an image with Ctrl+V, drop it into the dialog, or select a PNG, JPEG, or WebP file (up to 10 MB).
+Choose **Manage → Import screenshot**, then select or drop multiple PNG, JPEG, or WebP images, or paste screenshots one after another with Ctrl+V. Each submission supports up to 12 screenshots, 10 MB each and 50 MB combined. You can add images while recognition is running.
 
 The app recognizes English text locally in the browser using [Tesseract.js](https://github.com/naptha/tesseract.js). The OCR worker, engine, and English model are served by the app and prepared automatically by `npm run dev` and `npm run build`. No API key or paid recognition service is required. Screenshot pixels and recognized text are not uploaded or saved to the portfolio files.
+
+All screenshots feed one review and one confirmed import. Matching tickers with compatible values are combined, including shares and average costs shown in separate images. Overlapping screenshots never add share quantities together. Conflicting quantities or costs stay in separate rows; select the correct row before importing. Retry or remove failed/canceled images; finished images and edits are retained.
 
 Review and edit the tickers, share quantities, and average costs before confirming. Column mapping can be adjusted for different table layouts; unsupported layouts can be entered manually. Recognition accuracy depends on the screenshot, so this does not guarantee automatic extraction from every brokerage layout.
 

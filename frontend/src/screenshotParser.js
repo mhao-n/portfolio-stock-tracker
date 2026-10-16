@@ -157,14 +157,14 @@ function mobileRows(lines) {
       chunk.match(
         /(?:shares(?:\s+owned)?|quantity|qty|units)\s*[:=]?\s*([\d,.]+)/i,
       ) || chunk.match(/([\d,.]+)\s*(?:shares|units)\b/i);
-    if (!shares) continue;
     const cost = chunk.match(
       /(?:avg\.?\s*(?:cost|price)|average\s+(?:cost|price)|cost\s+per\s+(?:share|unit)|purchase\s+price)\s*[:=]?\s*([$€£¥]?\s*[\d,.]+)/i,
     );
     const basis = chunk.match(
       /(?:total\s+cost|cost\s+basis|book\s+cost)\s*[:=]?\s*([$€£¥]?\s*[\d,.]+)/i,
     );
-    const quantity = parseAmount(shares[1]);
+    if (!shares && !cost && !basis) continue;
+    const quantity = shares ? parseAmount(shares[1]) : "";
     const foreign = FOREIGN_CURRENCY.test(chunk);
     const basisValue = basis ? parseAmount(basis[1]) : "";
     rows.push({
@@ -196,7 +196,9 @@ export function extractHoldings(data, mapping = {}) {
     .filter(
       (row) =>
         row.hits.length >= 2 &&
-        row.hits.some((h) => h.role === "shares") &&
+        row.hits.some((h) =>
+          ["shares", "avgCost", "costBasis"].includes(h.role),
+        ) &&
         row.hits.some((h) => h.role === "symbol"),
     );
   let header = headers.sort((a, b) => b.hits.length - a.hits.length)[0];

@@ -7,16 +7,19 @@ import {
 } from "./screenshotParser.js";
 import { recognizeScreenshot, validateScreenshot } from "./screenshotOcr.js";
 
+import {
+  combineScreenshotRows,
+  validateScreenshotBatch,
+} from "./screenshotBatch.js";
+
 export default function ScreenshotImport({
   existingHoldings,
   onImport,
   onBusyChange,
 }) {
-  const [image, setImage] = useState(null),
-    [result, setResult] = useState(null),
-    [rows, setRows] = useState([]);
-  const [mapping, setMapping] = useState({}),
-    [error, setError] = useState(""),
+  const [images, setImages] = useState([]);
+  const [observations, setObservations] = useState([]);
+  const [error, setError] = useState(""),
     [progress, setProgress] = useState(null);
   const [processing, setProcessing] = useState(false),
     [saving, setSaving] = useState(false),
@@ -25,18 +28,24 @@ export default function ScreenshotImport({
     job = useRef(null),
     alive = useRef(true),
     counter = useRef(0);
+  const imageStore = useRef([]),
+    queue = useRef([]);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
+      queue.current = [];
       job.current?.abort();
+      imageStore.current.forEach((image) => URL.revokeObjectURL(image.url));
     };
   }, []);
-  useEffect(
-    () => () => {
-      if (image) URL.revokeObjectURL(image.url);
-    },
-    [image],
+  function changeImages(transform) {
+    imageStore.current = transform(imageStore.current);
+    setImages(imageStore.current);
+  }
+  const rows = useMemo(
+    () => combineScreenshotRows(observations),
+    [observations],
   );
   const issues = useMemo(
     () => reviewIssues(rows, existingHoldings),
@@ -44,90 +53,127 @@ export default function ScreenshotImport({
   );
   const selected = rows.filter((row) => row.selected);
   const existing = new Map(existingHoldings.map((row) => [row.symbol, row]));
-  const parsed = useMemo(
-    () => (result ? extractHoldings(result, mapping) : null),
-    [result, mapping],
-  );
-  const invalid = issues.some((list) => list.length);
+  const incomplete = images.some((image) => image.status !== "done");
+  const invalid =
+    issues.some((list) => list.length) || selected.length > 500 || incomplete;
   function update(index, patch) {
-    setRows((current) =>
-      current.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+    const ids = rows[index].observationIds;
+    setObservations((current) =>
+      current.map((row) => (ids.includes(row.id) ? { ...row, ...patch } : row)),
     );
     setConfirmed(false);
   }
-  function adopt(data, nextMapping = {}) {
-    const next = extractHoldings(data, nextMapping);
-    setMapping(nextMapping);
-    setRows(
-      next.rows
-        .slice(0, 500)
-        .map((row) => ({ ...row, id: ++counter.current, selected: true })),
+  function adopt(image, data, mapping = {}) {
+    const parsed = extractHoldings(data, mapping);
+    changeImages((current) =>
+      current.map((item) =>
+        item.id === image.id
+          ? { ...item, result: data, mapping, parsed, status: "done" }
+          : item,
+      ),
     );
+    setObservations((current) => [
+      ...current.filter((row) => row.screenshotId !== image.id),
+      ...parsed.rows.map((row) => ({
+        ...row,
+        id: ++counter.current,
+        screenshotId: image.id,
+        screenshotName: image.name,
+        selected: true,
+      })),
+    ]);
     setConfirmed(false);
-    if (next.rows.length > 500)
-      setError(
-        "Only the first 500 rows are shown. Import a smaller screenshot for the remaining holdings.",
+  }
+  async function drain() {
+    if (job.current || !alive.current) return;
+    setProcessing(true);
+    while (queue.current.length && alive.current) {
+      const image = queue.current.shift();
+      const controller = new AbortController();
+      job.current = controller;
+      changeImages((current) =>
+        current.map((item) =>
+          item.id === image.id ? { ...item, status: "reading" } : item,
+        ),
       );
+      setProgress({ name: image.name, progress: 0 });
+      try {
+        const data = await recognizeScreenshot(image.file, {
+          signal: controller.signal,
+          onProgress: (message) => {
+            if (alive.current && !controller.signal.aborted)
+              setProgress({ ...message, name: image.name });
+          },
+        });
+        if (alive.current && !controller.signal.aborted) adopt(image, data);
+      } catch (e) {
+        if (alive.current && !controller.signal.aborted)
+          changeImages((current) =>
+            current.map((item) =>
+              item.id === image.id ? { ...item, status: "error" } : item,
+            ),
+          );
+      } finally {
+        job.current = null;
+      }
+    }
+    if (alive.current) {
+      setProcessing(false);
+      setProgress(null);
+    }
   }
-  async function read(file) {
-    if (saving || processing) return;
+  function read(files) {
+    if (saving || !files.length) return;
     try {
-      validateScreenshot(file);
+      files.forEach(validateScreenshot);
+      validateScreenshotBatch(
+        imageStore.current.map((image) => image.file),
+        files,
+      );
     } catch (e) {
       setError(e.message);
       return;
     }
-    job.current?.abort();
-    const controller = new AbortController();
-    job.current = controller;
-    setImage({
+    const added = files.map((file) => ({
+      id: ++counter.current,
+      file,
       url: URL.createObjectURL(file),
       name: file.name || "Pasted screenshot",
-    });
-    setResult(null);
-    setRows([]);
+      status: "queued",
+    }));
+    changeImages((current) => [...current, ...added]);
+    queue.current.push(...added);
     setError("");
     setConfirmed(false);
-    setProcessing(true);
-    setProgress({ status: "Preparing screenshot", progress: 0 });
-    try {
-      const data = await recognizeScreenshot(file, {
-        signal: controller.signal,
-        onProgress: (message) => {
-          if (alive.current && !controller.signal.aborted) setProgress(message);
-        },
-      });
-      if (alive.current && !controller.signal.aborted) {
-        setResult(data);
-        adopt(data);
-      }
-    } catch (e) {
-      if (alive.current && !controller.signal.aborted)
-        setError(
-          "Could not read this screenshot. Try a clearer image or add the rows manually.",
-        );
-    } finally {
-      if (alive.current && job.current === controller) {
-        setProcessing(false);
-        setProgress(null);
-      }
-    }
+    void drain();
   }
   function cancel() {
+    queue.current = [];
     job.current?.abort();
-    setProcessing(false);
-    setProgress(null);
-    setError(
-      "Recognition canceled. Choose another image or enter holdings manually.",
+    changeImages((current) =>
+      current.map((image) =>
+        ["queued", "reading"].includes(image.status)
+          ? { ...image, status: "canceled" }
+          : image,
+      ),
     );
+    setConfirmed(false);
+  }
+  function removeImage(image) {
+    URL.revokeObjectURL(image.url);
+    changeImages((current) => current.filter((item) => item.id !== image.id));
+    setObservations((current) =>
+      current.filter((row) => row.screenshotId !== image.id),
+    );
+    setConfirmed(false);
   }
   function pasted(event) {
-    const file = Array.from(event.clipboardData?.files || []).find((file) =>
+    const files = Array.from(event.clipboardData?.files || []).filter((file) =>
       file.type.startsWith("image/"),
     );
-    if (file) {
+    if (files.length) {
       event.preventDefault();
-      void read(file);
+      read(files);
     }
   }
   async function save(event) {
@@ -161,21 +207,22 @@ export default function ScreenshotImport({
   return (
     <div className="screenshot-import" onPaste={pasted}>
       <p className="screenshot-intro">
-        Paste or upload a holdings screenshot from a brokerage, then review the
-        extracted rows. Images are processed on this computer; no API key or
-        paid service is needed.
+        Paste or upload holdings screenshots from any brokerage, then review the
+        combined extracted rows. Images are processed on this computer; no API
+        key or paid service is needed.
       </p>
       <input
         ref={input}
         className="file-input"
         type="file"
         accept="image/png,image/jpeg,image/webp"
-        aria-label="Upload portfolio screenshot"
-        disabled={processing || saving}
+        aria-label="Upload portfolio screenshots"
+        multiple
+        disabled={saving}
         onChange={(event) => {
-          const file = event.target.files?.[0];
+          const files = Array.from(event.target.files || []);
           event.target.value = "";
-          if (file) void read(file);
+          read(files);
         }}
       />
       <div
@@ -187,38 +234,143 @@ export default function ScreenshotImport({
         }}
         onDrop={(event) => {
           event.preventDefault();
-          const file = event.dataTransfer.files?.[0];
-          if (file) void read(file);
+          read(Array.from(event.dataTransfer.files || []));
         }}
       >
         <ImagePlus size={26} />
-        <strong>Paste a screenshot here with Ctrl+V</strong>
-        <span>Or drop an image · PNG, JPEG, WebP · up to 10 MB</span>
-        <button
-          onClick={() => input.current?.click()}
-          disabled={processing || saving}
-        >
-          Choose screenshot
+        <strong>Paste screenshots here with Ctrl+V</strong>
+        <span>
+          Choose or drop multiple images · PNG, JPEG, WebP · 10 MB each · 12
+          images / 50 MB total
+        </span>
+        <button onClick={() => input.current?.click()} disabled={saving}>
+          Choose screenshots
         </button>
       </div>
-      {image && (
-        <details className="screenshot-preview">
-          <summary>View screenshot: {image.name}</summary>
-          <img
-            src={image.url}
-            alt="Uploaded portfolio screenshot for comparison"
-          />
-        </details>
+      {images.length > 0 && (
+        <div className="screenshot-batch">
+          <p className="screenshot-help">
+            {images.length} / 12 screenshots · Matching positions are combined
+            without adding shares. Conflicting rows stay separate; uncheck or
+            remove the incorrect row. You can keep adding screenshots.
+          </p>
+          {images.map((image, index) => (
+            <div className="screenshot-file" key={image.id}>
+              <div className="screenshot-file-heading">
+                <span>
+                  Screenshot {index + 1}: {image.name} ·{" "}
+                  {image.status === "done"
+                    ? image.parsed.rows.length + " rows read"
+                    : image.status}
+                </span>
+                <div>
+                  {["error", "canceled"].includes(image.status) && (
+                    <button
+                      disabled={processing || saving}
+                      onClick={() => {
+                        changeImages((current) =>
+                          current.map((item) =>
+                            item.id === image.id
+                              ? { ...item, status: "queued" }
+                              : item,
+                          ),
+                        );
+                        queue.current.push(image);
+                        setConfirmed(false);
+                        void drain();
+                      }}
+                    >
+                      Retry screenshot {index + 1}
+                    </button>
+                  )}
+                  <button
+                    className="icon danger"
+                    aria-label={`Remove screenshot ${index + 1}`}
+                    disabled={processing || saving}
+                    onClick={() => removeImage(image)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+              {["error", "canceled"].includes(image.status) && (
+                <p className="bad" role="status">
+                  Retry or remove this screenshot before importing. Completed
+                  screenshots are still available.
+                </p>
+              )}
+              {image.status === "done" && !image.parsed.rows.length && (
+                <p className="screenshot-help">
+                  No holdings identified. Adjust the columns, add rows manually,
+                  or remove this image.
+                </p>
+              )}
+              <details className="screenshot-preview">
+                <summary>View screenshot {index + 1}</summary>
+                <img
+                  src={image.url}
+                  alt={`Portfolio screenshot ${index + 1}`}
+                />
+              </details>
+              {image.parsed?.columns.length > 0 && (
+                <details className="screenshot-mapping">
+                  <summary>Adjust columns for screenshot {index + 1}</summary>
+                  <p>
+                    Choose the columns for each field. Average cost means
+                    purchase cost per share. Changing a mapping replaces this
+                    screenshot's extracted rows.
+                  </p>
+                  <div className="mapping-fields">
+                    {[
+                      ["symbol", "Ticker"],
+                      ["shares", "Shares"],
+                      ["avgCost", "Average cost"],
+                      ["costBasis", "Total cost basis"],
+                    ].map(([key, label]) => (
+                      <label key={key}>
+                        {label}
+                        <select
+                          aria-label={`Screenshot ${index + 1} ${label} source column`}
+                          value={image.parsed.mapping[key] ?? ""}
+                          disabled={saving || processing}
+                          onChange={(event) =>
+                            adopt(image, image.result, {
+                              ...image.parsed.mapping,
+                              [key]: event.target.value,
+                            })
+                          }
+                        >
+                          <option value="">Not in screenshot</option>
+                          {image.parsed.columns.map((column) => (
+                            <option key={column.id} value={column.id}>
+                              {column.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {image.result?.text && (
+                <details className="ocr-source">
+                  <summary>Recognized text for screenshot {index + 1}</summary>
+                  <pre>{image.result.text}</pre>
+                </details>
+              )}
+            </div>
+          ))}
+        </div>
       )}
       {processing && (
         <div className="ocr-progress" role="status">
           <span>
             {progress?.status?.includes("recogniz")
-              ? "Reading screenshot"
+              ? "Reading screenshots"
               : progress?.status?.includes("load")
                 ? "Loading local recognition resources"
                 : "Preparing screenshot"}
-            …
+            … {progress?.name}
           </span>
           <progress max={1} value={progress?.progress || 0} />
           <button onClick={cancel}>
@@ -231,50 +383,15 @@ export default function ScreenshotImport({
           {error}
         </p>
       )}
-      {result && !rows.length && (
-        <p role="status">
-          No holdings could be identified. Try a crop that includes tickers and
-          share quantities, or add rows below.
+      {incomplete && !processing && (
+        <p className="bad" role="status">
+          Retry or remove unfinished screenshots to enable import.
         </p>
       )}
-      {parsed?.columns.length > 0 && (
-        <details className="screenshot-mapping">
-          <summary>Adjust detected column mapping</summary>
-          <p>
-            Choose the screenshot columns for each field. Only select average
-            cost if that column is the purchase cost per share.
-          </p>
-          <div className="mapping-fields">
-            {[
-              ["symbol", "Ticker"],
-              ["shares", "Shares"],
-              ["avgCost", "Average cost"],
-              ["costBasis", "Total cost basis"],
-            ].map(([key, label]) => (
-              <label key={key}>
-                {label}
-                <select
-                  aria-label={`${label} source column`}
-                  value={parsed.mapping[key] ?? ""}
-                  disabled={saving || processing}
-                  onChange={(event) =>
-                    adopt(result, {
-                      ...parsed.mapping,
-                      [key]: event.target.value,
-                    })
-                  }
-                >
-                  <option value="">Not in screenshot</option>
-                  {parsed.columns.map((column) => (
-                    <option key={column.id} value={column.id}>
-                      {column.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-          </div>
-        </details>
+      {selected.length > 500 && (
+        <p className="bad" role="status">
+          Select at most 500 holdings per import.
+        </p>
       )}
       <form onSubmit={save}>
         <div className="section-heading">
@@ -285,7 +402,7 @@ export default function ScreenshotImport({
             type="button"
             disabled={saving || processing || rows.length >= 500}
             onClick={() => {
-              setRows((current) => [
+              setObservations((current) => [
                 ...current,
                 {
                   id: ++counter.current,
@@ -341,8 +458,10 @@ export default function ScreenshotImport({
                         className="icon danger"
                         aria-label={`Remove import row ${index + 1}`}
                         onClick={() => {
-                          setRows((current) =>
-                            current.filter((_, i) => i !== index),
+                          setObservations((current) =>
+                            current.filter(
+                              (item) => !row.observationIds.includes(item.id),
+                            ),
                           );
                           setConfirmed(false);
                         }}
@@ -392,6 +511,11 @@ export default function ScreenshotImport({
                         />
                       </label>
                     </div>
+                    <p className="screenshot-help">
+                      {row.sources.length > 1
+                        ? `Combined from ${row.sources.length} screenshots`
+                        : row.sources[0].name}
+                    </p>
                     {row.confidence < 65 && (
                       <p className="ocr-caution">
                         Some text was unclear. Check this row against the
@@ -410,7 +534,11 @@ export default function ScreenshotImport({
                     )}
                     <details className="ocr-source">
                       <summary>Recognized source text</summary>
-                      <p>{row.source}</p>
+                      <p>
+                        {row.sources
+                          .map((source) => source.name + ": " + source.text)
+                          .join("\n\n")}
+                      </p>
                     </details>
                   </fieldset>
                 );
@@ -451,12 +579,6 @@ export default function ScreenshotImport({
           </button>
         </footer>
       </form>
-      {result?.text && (
-        <details className="ocr-source">
-          <summary>All recognized text</summary>
-          <pre>{result.text}</pre>
-        </details>
-      )}
     </div>
   );
 }
