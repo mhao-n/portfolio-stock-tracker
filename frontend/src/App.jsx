@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { BarChart3, BriefcaseBusiness, CalendarDays, Command, Download, Edit3, ExternalLink, LayoutGrid, Moon, Newspaper, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Sun, Table2, Trash2, Upload, Wallet, X } from 'lucide-react';
+import { BarChart3, BriefcaseBusiness, CalendarDays, Command, Download, Edit3, ExternalLink, LayoutGrid, Moon, Newspaper, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Sun, Table2, Trash2, Upload, Wallet, X, ChevronDown, MoreHorizontal, ArrowUpDown, ArrowUpRight } from 'lucide-react';
 import './style.css';
+import { portfolioHistory } from './portfolioHistory.js';
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+const API = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 const COLORS = ['var(--blue)', 'var(--green)', 'var(--warning)', 'var(--red)', 'var(--purple)', 'var(--teal)', 'var(--orange)', 'var(--text-soft)'];
 const SORT_OPTIONS = [
   { value: 'value', label: 'Position value' },
@@ -29,6 +30,22 @@ const SCENARIOS = {
   base: { label: 'Base', prior: 1, signal: 1, range: 1 },
   aggressive: { label: 'Aggressive', prior: 1.25, signal: 1.20, range: 0.92 }
 };
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    throw new Error(
+      error.name === "AbortError"
+        ? "The request took too long. Please try again."
+        : "Unable to reach the server. Check your connection and try again.",
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 function money(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
@@ -90,7 +107,7 @@ function shortDate(value) {
   if (!value) return '--';
   const date = typeof value === 'number'
     ? new Date(value > 1000000000000 ? value : value * 1000)
-    : new Date(value);
+    : new Date(/^\d{4}-\d{2}-\d{2}$/.test(String(value)) ? value + 'T12:00:00' : value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
@@ -381,274 +398,848 @@ function StatCard({ label, value, sub, positive, className = '' }) {
   </div>;
 }
 
-function HoldingCard({ holding, onDelete, onUpdate, pinned, onTogglePin }) {
-  const [open, setOpen] = useState(false);
+function HoldingCard({
+  holding,
+  onDelete,
+  onUpdate,
+  pinned,
+  onTogglePin,
+  expanded = false,
+}) {
+  const [open, setOpen] = useState(expanded);
   const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ shares: holding.shares, avgCost: holding.avgCost });
+  const [editForm, setEditForm] = useState({
+    shares: holding.shares,
+    avgCost: holding.avgCost,
+  });
   const chartData = useMemo(() => {
-    const history = holding.history?.slice(-75).map(p => ({ date: p.date.slice(5), close: Number(p.close.toFixed(2)) })) || [];
-    const forecast = holding.forecast?.map(p => ({ date: p.date.slice(5), close: Number(p.predictedClose.toFixed(2)), predicted: true })) || [];
+    const history =
+      holding.history
+        ?.slice(-75)
+        .map((p) => ({
+          date: p.date.slice(5),
+          close: Number(p.close.toFixed(2)),
+        })) || [];
+    const forecast =
+      holding.forecast?.map((p) => ({
+        date: p.date.slice(5),
+        close: Number(p.predictedClose.toFixed(2)),
+        predicted: true,
+      })) || [];
     return [...history, ...forecast];
   }, [holding]);
 
   const dayPositive = Number(holding.dayChange || 0) >= 0;
   const gainPositive = Number(holding.unrealizedGain || 0) >= 0;
-  const positionDayChange = Number(holding.shares || 0) * Number(holding.dayChange || 0);
+  const positionDayChange =
+    Number(holding.shares || 0) * Number(holding.dayChange || 0);
   async function saveEdit(e) {
     e.preventDefault();
-    await onUpdate({ symbol: holding.symbol, shares: editForm.shares, avgCost: editForm.avgCost });
-    setEditing(false);
+    const saved = await onUpdate({
+      symbol: holding.symbol,
+      shares: editForm.shares,
+      avgCost: editForm.avgCost,
+    });
+    if (saved) setEditing(false);
   }
 
-  return <section className="holding-card">
-    <div className="holding-top">
-      <div>
-        <div className="symbol-row">
-          <h2>{holding.symbol}</h2>
-          <button onClick={() => setOpen(!open)}>{open ? 'Hide details' : 'Details'}</button>
-          <button className={pinned ? 'pin active' : 'pin'} onClick={() => onTogglePin(holding.symbol)} title={pinned ? 'Unpin holding' : 'Pin holding'}><Star size={17}/></button>
-          <button className="pin" onClick={() => setEditing(true)} title="Edit holding"><Edit3 size={17}/></button>
+  return (
+    <section className="holding-card">
+      <div className="holding-top">
+        <div>
+          <div className="symbol-row">
+            <h2>{holding.symbol}</h2>
+            <button onClick={() => setOpen(!open)}>
+              {open ? "Hide details" : "Details"}
+            </button>
+            <button
+              className={pinned ? "pin active" : "pin"}
+              onClick={() => onTogglePin(holding.symbol)}
+              title={pinned ? "Unpin holding" : "Pin holding"}
+            >
+              <Star size={17} />
+            </button>
+            <button
+              className="pin"
+              onClick={() => setEditing(true)}
+              title="Edit holding"
+            >
+              <Edit3 size={17} />
+            </button>
+          </div>
+          <p>{holding.name}</p>
         </div>
-        <p>{holding.name}</p>
-      </div>
-      <button className="icon danger" onClick={() => onDelete(holding.symbol)} title="Remove holding"><Trash2 size={18}/></button>
-    </div>
-
-    {editing && (
-      <form className="inline-edit" onSubmit={saveEdit}>
-        <input type="number" step="any" value={editForm.shares} onChange={e => setEditForm({ ...editForm, shares: e.target.value })} aria-label={`${holding.symbol} shares`} />
-        <input type="number" step="any" value={editForm.avgCost} onChange={e => setEditForm({ ...editForm, avgCost: e.target.value })} aria-label={`${holding.symbol} average cost`} />
-        <button><Save size={16}/> Save</button>
-        <button type="button" className="secondary" onClick={() => setEditing(false)}><X size={16}/> Cancel</button>
-      </form>
-    )}
-
-    <div className="holding-grid">
-      <StatCard label="Price" value={money(holding.price)} sub={`Day: ${signedMoney(holding.dayChange)} (${signedPct(holding.dayChangePercent)})`} positive={dayPositive} />
-      <StatCard label="Position Value" value={money(holding.value)} sub={`${num(holding.shares)} shares @ ${money(holding.avgCost)}`} />
-      <StatCard label="Position Day Change" value={signedMoney(positionDayChange)} sub={signedPct(holding.dayChangePercent)} positive={positionDayChange >= 0} />
-      <StatCard label="Unrealized P/L" value={money(holding.unrealizedGain)} sub={pct(holding.unrealizedGainPercent)} positive={gainPositive} />
-      <StatCard className="signal-card" label="Signal" value={holding.signal} sub={`SMA20 ${money(holding.sma20)} - SMA50 ${money(holding.sma50)}`} />
-    </div>
-
-    {holding.dataStatus === 'error' && (
-      <div className="notice error inline-error">Yahoo data unavailable for {holding.symbol}: {holding.dataError || 'unknown error'}</div>
-    )}
-
-    <div className="chart-wrap">
-      <ResponsiveContainer width="100%" height={190}>
-        <AreaChart data={chartData} margin={{ top: 8, right: 14, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" minTickGap={38} />
-          <YAxis domain={['auto', 'auto']} width={64} />
-          <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(v) => money(v)} />
-          <Area type="monotone" dataKey="close" stroke="var(--blue)" fill="var(--blue)" strokeWidth={2} fillOpacity={0.10} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-
-    {open && <div className="details">
-      <div className="mini-grid">
-        <StatCard label="Day High / Low" value={`${money(holding.dayHigh)} / ${money(holding.dayLow)}`} />
-        <StatCard label="Prev Close" value={money(holding.previousClose)} />
-        <StatCard label="Volume" value={num(holding.volume, 0)} sub={`Avg ${num(holding.avgVolume, 0)}`} />
-        <StatCard label="52W High / Low" value={`${holding.fundamentals?.fiftyTwoWeekHigh || '--'} / ${holding.fundamentals?.fiftyTwoWeekLow || '--'}`} />
-        <StatCard label="Market Cap" value={holding.fundamentals?.marketCap || '--'} />
-        <StatCard label="P/E" value={`T: ${holding.fundamentals?.trailingPE || '--'} - F: ${holding.fundamentals?.forwardPE || '--'}`} />
-        <StatCard label="Target Mean Price" value={holding.fundamentals?.targetMeanPrice || '--'} />
-        <StatCard label="Latest Earnings Period" value={holding.fundamentals?.earningsTrends?.[0]?.period || '--'} sub={`EPS ${holding.fundamentals?.earningsTrends?.[0]?.earningsEstimateAvg || '--'}`} />
+        <button
+          className="icon danger"
+          onClick={() => onDelete(holding.symbol)}
+          title="Remove holding"
+        >
+          <Trash2 size={18} />
+        </button>
       </div>
 
-      <h3>Earnings / Revenue Estimates</h3>
-      <div className="earnings-table">
-        <div className="row head"><span>Period</span><span>EPS Avg</span><span>Revenue Avg</span><span>Growth</span></div>
-        {(holding.fundamentals?.earningsTrends || []).map((t, i) => (
-          <div className="row" key={i}><span>{t.period}</span><span>{t.earningsEstimateAvg || '--'}</span><span>{t.revenueEstimateAvg || '--'}</span><span>{t.growth || '--'}</span></div>
-        ))}
-      </div>
-    </div>}
-  </section>;
-}
+      {editing && (
+        <form className="inline-edit" onSubmit={saveEdit}>
+          <input
+            type="number"
+            step="any"
+            value={editForm.shares}
+            onChange={(e) =>
+              setEditForm({ ...editForm, shares: e.target.value })
+            }
+            aria-label={`${holding.symbol} shares`}
+          />
+          <input
+            type="number"
+            step="any"
+            value={editForm.avgCost}
+            onChange={(e) =>
+              setEditForm({ ...editForm, avgCost: e.target.value })
+            }
+            aria-label={`${holding.symbol} average cost`}
+          />
+          <button>
+            <Save size={16} /> Save
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setEditing(false)}
+          >
+            <X size={16} /> Cancel
+          </button>
+        </form>
+      )}
 
-function HoldingsTable({ holdings, pinnedSymbols, visibleColumns, onTogglePin, onUpdate, onDelete }) {
-  const [editingSymbol, setEditingSymbol] = useState('');
-  const [editForm, setEditForm] = useState({ shares: '', avgCost: '' });
-  const shownColumns = HOLDING_COLUMNS.filter(column => visibleColumns.includes(column.key));
-  const gridTemplate = `42px minmax(90px, .65fr) ${shownColumns.map(column => column.key === 'signal' ? 'minmax(150px, 1.1fr)' : 'minmax(100px, 1fr)').join(' ')} 110px`;
-  function startEdit(holding) {
-    setEditingSymbol(holding.symbol);
-    setEditForm({ shares: holding.shares, avgCost: holding.avgCost });
-  }
-  async function saveEdit(symbol) {
-    await onUpdate({ symbol, shares: editForm.shares, avgCost: editForm.avgCost });
-    setEditingSymbol('');
-  }
-  return <div className="holdings-table">
-    <div className="holdings-table-row head" style={{ gridTemplateColumns: gridTemplate }}>
-      <span></span>
-      <span>Symbol</span>
-      {shownColumns.map(column => <span key={column.key}>{column.label}</span>)}
-      <span></span>
-    </div>
-    {holdings.map(holding => {
-      const editing = editingSymbol === holding.symbol;
-      const positionDayChange = Number(holding.shares || 0) * Number(holding.dayChange || 0);
-      const cells = {
-        price: <span>{money(holding.price)}</span>,
-        shares: editing ? <input type="number" step="any" value={editForm.shares} onChange={e => setEditForm({ ...editForm, shares: e.target.value })}/> : <span>{num(holding.shares)}</span>,
-        avgCost: editing ? <input type="number" step="any" value={editForm.avgCost} onChange={e => setEditForm({ ...editForm, avgCost: e.target.value })}/> : <span>{money(holding.avgCost)}</span>,
-        value: <span>{money(holding.value)}</span>,
-        day: <span className={positionDayChange >= 0 ? 'good' : 'bad'}>{signedMoney(positionDayChange)} <small>{signedPct(holding.dayChangePercent)}</small></span>,
-        gain: <span className={Number(holding.unrealizedGain || 0) >= 0 ? 'good' : 'bad'}>{money(holding.unrealizedGain)} <small>{pct(holding.unrealizedGainPercent)}</small></span>,
-        signal: <span>{holding.signal}</span>
-      };
-      return <div className="holdings-table-row" key={holding.symbol} style={{ gridTemplateColumns: gridTemplate }}>
-        <button className={pinnedSymbols.includes(holding.symbol) ? 'pin active' : 'pin'} onClick={() => onTogglePin(holding.symbol)} title={pinnedSymbols.includes(holding.symbol) ? 'Unpin holding' : 'Pin holding'}><Star size={16}/></button>
-        <strong>{holding.symbol}</strong>
-        {shownColumns.map(column => <React.Fragment key={column.key}>{cells[column.key]}</React.Fragment>)}
-        <span className="row-actions">
-          {editing
-            ? <>
-                <button className="pin" onClick={() => saveEdit(holding.symbol)} title="Save"><Save size={16}/></button>
-                <button className="pin" onClick={() => setEditingSymbol('')} title="Cancel"><X size={16}/></button>
-              </>
-            : <button className="pin" onClick={() => startEdit(holding)} title="Edit"><Edit3 size={16}/></button>}
-          <button className="pin danger" onClick={() => onDelete(holding.symbol)} title="Remove"><Trash2 size={16}/></button>
-        </span>
-      </div>;
-    })}
-  </div>;
-}
+      <div className="holding-grid">
+        <StatCard
+          label="Price"
+          value={money(holding.price)}
+          sub={`Day: ${signedMoney(holding.dayChange)} (${signedPct(holding.dayChangePercent)})`}
+          positive={dayPositive}
+        />
+        <StatCard
+          label="Position Value"
+          value={money(holding.value)}
+          sub={`${num(holding.shares)} shares @ ${money(holding.avgCost)}`}
+        />
+        <StatCard
+          label="Position Day Change"
+          value={signedMoney(positionDayChange)}
+          sub={signedPct(holding.dayChangePercent)}
+          positive={positionDayChange >= 0}
+        />
+        <StatCard
+          label="Unrealized P/L"
+          value={money(holding.unrealizedGain)}
+          sub={pct(holding.unrealizedGainPercent)}
+          positive={gainPositive}
+        />
+        <StatCard
+          className="signal-card"
+          label="Signal"
+          value={holding.signal}
+          sub={`SMA20 ${money(holding.sma20)} - SMA50 ${money(holding.sma50)}`}
+        />
+      </div>
 
-function PortfolioSnapshotPanel({ snapshots = [] }) {
-  const chartData = snapshots.slice(-90).map(row => ({
-    date: String(row.date || '').slice(5),
-    totalValue: Number(row.totalValue || 0),
-    holdingsValue: Number(row.holdingsValue || 0),
-    cashBalance: Number(row.cashBalance || 0)
-  })).filter(row => row.totalValue > 0);
-  const latest = snapshots.at(-1);
-  const first = chartData[0];
-  const last = chartData.at(-1);
-  const change = first && last ? last.totalValue - first.totalValue : null;
-  return <section className="panel snapshot-panel">
-    <div className="panel-head">
-      <div>
-        <h2>Portfolio History</h2>
-        <p>Daily value snapshots saved locally when the dashboard refreshes.</p>
-      </div>
-      <div className="snapshot-stats">
-        <strong>{money(latest?.totalValue)}</strong>
-        <span className={Number(change || 0) >= 0 ? 'good' : 'bad'}>{signedMoney(change)}</span>
-      </div>
-    </div>
-    {chartData.length > 1 ? (
+      {holding.dataStatus === "error" && (
+        <div className="notice error inline-error">
+          Yahoo data unavailable for {holding.symbol}:{" "}
+          {holding.dataError || "unknown error"}
+        </div>
+      )}
+
       <div className="chart-wrap">
-        <ResponsiveContainer width="100%" height={210}>
-          <AreaChart data={chartData} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height={190}>
+          <AreaChart
+            data={chartData}
+            margin={{ top: 8, right: 14, left: 0, bottom: 0 }}
+          >
             <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" minTickGap={32} />
-            <YAxis tickFormatter={compactMoney} width={72} />
-            <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(value, name) => [money(value), name]} />
-            <Area type="monotone" dataKey="totalValue" name="Total value" stroke="var(--green)" fill="var(--green)" fillOpacity={0.18} strokeWidth={2} />
-            <Area type="monotone" dataKey="holdingsValue" name="Holdings value" stroke="var(--blue)" fill="var(--blue)" fillOpacity={0.10} strokeWidth={2} />
+            <XAxis dataKey="date" minTickGap={38} />
+            <YAxis domain={["auto", "auto"]} width={64} />
+            <Tooltip
+              contentStyle={{
+                background: "var(--panel)",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                color: "var(--text)",
+              }}
+              labelStyle={{ color: "var(--text)" }}
+              formatter={(v) => money(v)}
+            />
+            <Area
+              type="monotone"
+              dataKey="close"
+              stroke="var(--blue)"
+              fill="var(--blue)"
+              strokeWidth={2}
+              fillOpacity={0.1}
+            />
           </AreaChart>
         </ResponsiveContainer>
       </div>
-    ) : <div className="empty-state">Refresh on another day to build the portfolio history chart.</div>}
-  </section>;
+
+      {open && (
+        <div className="details">
+          <div className="mini-grid">
+            <StatCard
+              label="Day High / Low"
+              value={`${money(holding.dayHigh)} / ${money(holding.dayLow)}`}
+            />
+            <StatCard label="Prev Close" value={money(holding.previousClose)} />
+            <StatCard
+              label="Volume"
+              value={num(holding.volume, 0)}
+              sub={`Avg ${num(holding.avgVolume, 0)}`}
+            />
+            <StatCard
+              label="52W High / Low"
+              value={`${holding.fundamentals?.fiftyTwoWeekHigh || "--"} / ${holding.fundamentals?.fiftyTwoWeekLow || "--"}`}
+            />
+            <StatCard
+              label="Market Cap"
+              value={holding.fundamentals?.marketCap || "--"}
+            />
+            <StatCard
+              label="P/E"
+              value={`T: ${holding.fundamentals?.trailingPE || "--"} - F: ${holding.fundamentals?.forwardPE || "--"}`}
+            />
+            <StatCard
+              label="Target Mean Price"
+              value={holding.fundamentals?.targetMeanPrice || "--"}
+            />
+            <StatCard
+              label="Latest Earnings Period"
+              value={holding.fundamentals?.earningsTrends?.[0]?.period || "--"}
+              sub={`EPS ${holding.fundamentals?.earningsTrends?.[0]?.earningsEstimateAvg || "--"}`}
+            />
+          </div>
+
+          <h3>Earnings / Revenue Estimates</h3>
+          <div className="earnings-table">
+            <div className="row head">
+              <span>Period</span>
+              <span>EPS Avg</span>
+              <span>Revenue Avg</span>
+              <span>Growth</span>
+            </div>
+            {(holding.fundamentals?.earningsTrends || []).map((t, i) => (
+              <div className="row" key={i}>
+                <span>{t.period}</span>
+                <span>{t.earningsEstimateAvg || "--"}</span>
+                <span>{t.revenueEstimateAvg || "--"}</span>
+                <span>{t.growth || "--"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Dialog({ title, children, onClose, side = false, busy = false }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const node = ref.current;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    node.showModal();
+    node.querySelector("input:not([readonly])")?.focus();
+    return () => {
+      node.close();
+      document.body.style.overflow = overflow;
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={side ? "app-dialog detail-drawer" : "app-dialog"}
+      aria-label={title}
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onClose();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) onClose();
+      }}
+    >
+      <div className="dialog-body">
+        <header className="dialog-head">
+          <h2>{title}</h2>
+          <button
+            className="icon"
+            onClick={onClose}
+            disabled={busy}
+            aria-label="Close dialog"
+          >
+            <X size={20} />
+          </button>
+        </header>
+        {children}
+      </div>
+    </dialog>
+  );
+}
+function ActionMenu({
+  label,
+  children,
+  className = "",
+  icon = <MoreHorizontal size={18} />,
+}) {
+  const ref = useRef(null);
+  useEffect(() => {
+    function close(e) {
+      if (e.key === "Escape" && ref.current?.open) {
+        ref.current.removeAttribute("open");
+        ref.current.querySelector("summary")?.focus();
+      } else if (!ref.current?.contains(e.target)) {
+        ref.current?.removeAttribute("open");
+      }
+    }
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
+  return (
+    <details className={`action-menu ${className}`} ref={ref}>
+      <summary>
+        {icon}
+        <span>{label}</span>
+        <ChevronDown size={14} />
+      </summary>
+      <div
+        className="action-menu-content"
+        onClick={(e) => {
+          if (e.target.closest("button")) ref.current?.removeAttribute("open");
+        }}
+      >
+        {children}
+      </div>
+    </details>
+  );
+}
+function LoadingPlaceholder({ kind = "rows", label = "Loading portfolio" }) {
+  return (
+    <div
+      className={`loading-placeholder loading-${kind}`}
+      role="status"
+      aria-label={label}
+    >
+      <span className="sr-only">{label}</span>
+      {Array.from({ length: kind === "chart" ? 3 : 5 }, (_, i) => (
+        <div className="skeleton" key={i} aria-hidden="true" />
+      ))}
+    </div>
+  );
+}
+function RetryNotice({ error, onRetry, loading = false }) {
+  return error ? (
+    <div className="notice error retry-notice" role="alert">
+      <div>
+        <strong>Couldn't update this data</strong>
+        <p>{error}</p>
+      </div>
+      <button onClick={onRetry} disabled={loading}>
+        <RefreshCw size={15} /> Retry
+      </button>
+    </div>
+  ) : null;
+}
+function HoldingsTable({
+  holdings,
+  pinnedSymbols,
+  visibleColumns,
+  onTogglePin,
+  onEdit,
+  onDelete,
+  onSelect,
+}) {
+  const columns = HOLDING_COLUMNS.filter((column) =>
+    visibleColumns.includes(column.key),
+  );
+  const cells = (h) => ({
+    price: money(h.price),
+    shares: num(h.shares),
+    avgCost: money(h.avgCost),
+    value: money(h.value),
+    day: (
+      <span className={Number(h.dayChange || 0) >= 0 ? "good" : "bad"}>
+        {signedMoney(Number(h.shares || 0) * Number(h.dayChange || 0))}
+        <small>{signedPct(h.dayChangePercent)}</small>
+      </span>
+    ),
+    gain: (
+      <span className={Number(h.unrealizedGain || 0) >= 0 ? "good" : "bad"}>
+        {signedMoney(h.unrealizedGain)}
+        <small>{signedPct(h.unrealizedGainPercent)}</small>
+      </span>
+    ),
+    signal: <span className="signal-badge">{h.signal || "--"}</span>,
+  });
+  const pin = (h) => (
+    <button
+      className={pinnedSymbols.includes(h.symbol) ? "pin active" : "pin"}
+      onClick={() => onTogglePin(h.symbol)}
+      aria-label={`${pinnedSymbols.includes(h.symbol) ? "Unpin" : "Pin"} ${h.symbol}`}
+      aria-pressed={pinnedSymbols.includes(h.symbol)}
+    >
+      <Star size={15} />
+    </button>
+  );
+  return (
+    <>
+      <div className="holdings-table desktop-holdings">
+        <table>
+          <caption className="sr-only">
+            Portfolio holdings. Select a symbol for details.
+          </caption>
+          <thead>
+            <tr>
+              <th>
+                <span className="sr-only">Pinned</span>
+              </th>
+              <th scope="col">Holding</th>
+              {columns.map((c) => (
+                <th scope="col" key={c.key}>
+                  {c.label}
+                </th>
+              ))}
+              <th>
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {holdings.map((h) => (
+              <tr key={h.symbol}>
+                <td>{pin(h)}</td>
+                <th scope="row">
+                  <button
+                    className="holding-link"
+                    onClick={() => onSelect(h.symbol)}
+                    aria-label={`View ${h.symbol} details`}
+                  >
+                    <span>
+                      {h.symbol}
+                      <ArrowUpRight size={13} />
+                    </span>
+                    <small>{h.name}</small>
+                    {h.dataStatus === "error" && (
+                      <small className="bad">Price unavailable</small>
+                    )}
+                  </button>
+                </th>
+                {columns.map((c) => (
+                  <td key={c.key}>{cells(h)[c.key]}</td>
+                ))}
+                <td>
+                  <span className="row-actions">
+                    <button
+                      className="pin"
+                      onClick={() => onEdit(h)}
+                      aria-label={`Edit ${h.symbol}`}
+                    >
+                      <Edit3 size={15} />
+                    </button>
+                    <button
+                      className="pin danger"
+                      onClick={() => onDelete(h.symbol)}
+                      aria-label={`Remove ${h.symbol}`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mobile-holdings">
+        {holdings.map((h) => (
+          <details key={h.symbol} className="mobile-holding">
+            <summary>
+              <span className="mobile-symbol">
+                <strong>{h.symbol}</strong>
+                <small>{h.name}</small>
+              </span>
+              <span className="mobile-value">
+                <strong>{money(h.value)}</strong>
+                <small
+                  className={Number(h.dayChange || 0) >= 0 ? "good" : "bad"}
+                >
+                  {signedPct(h.dayChangePercent)} today
+                </small>
+              </span>
+              <ChevronDown size={16} />
+            </summary>
+            <div className="mobile-holding-content">
+              <dl>
+                <div>
+                  <dt>Price</dt>
+                  <dd>{money(h.price)}</dd>
+                </div>
+                <div>
+                  <dt>Shares</dt>
+                  <dd>{num(h.shares)}</dd>
+                </div>
+                <div>
+                  <dt>Average cost</dt>
+                  <dd>{money(h.avgCost)}</dd>
+                </div>
+                <div>
+                  <dt>Total gain</dt>
+                  <dd>{signedMoney(h.unrealizedGain)}</dd>
+                </div>
+              </dl>
+              {h.dataStatus === "error" && (
+                <p className="bad">Price unavailable. Refresh to try again.</p>
+              )}
+              <div className="mobile-row-actions">
+                <button onClick={() => onSelect(h.symbol)}>
+                  View details <ArrowUpRight size={15} />
+                </button>
+                <button
+                  onClick={() => onEdit(h)}
+                  aria-label={`Edit ${h.symbol}`}
+                >
+                  <Edit3 size={16} />
+                </button>
+                {pin(h)}
+                <button
+                  className="danger"
+                  onClick={() => onDelete(h.symbol)}
+                  aria-label={`Remove ${h.symbol}`}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+          </details>
+        ))}
+      </div>
+    </>
+  );
+}
+function PortfolioSnapshotPanel({ snapshots = [], loading, unavailable }) {
+  const [range, setRange] = useState("1M");
+  const data = useMemo(
+    () => portfolioHistory(snapshots, range),
+    [snapshots, range],
+  );
+  const first = data[0],
+    last = data.at(-1);
+  const change = data.length > 1 ? last.totalValue - first.totalValue : null;
+  const percent =
+    first?.totalValue && change !== null
+      ? (change / first.totalValue) * 100
+      : null;
+  return (
+    <section
+      className="panel snapshot-panel"
+      aria-label="Portfolio performance"
+    >
+      <div className="panel-head">
+        <div>
+          <h2>Portfolio performance</h2>
+          <p>Value over time, including cash and contributions.</p>
+        </div>
+        <div
+          className="segmented chart-ranges"
+          role="group"
+          aria-label="Chart time range"
+        >
+          {["1W", "1M", "3M", "1Y", "ALL"].map((value) => (
+            <button
+              key={value}
+              className={range === value ? "active" : ""}
+              aria-pressed={range === value}
+              onClick={() => setRange(value)}
+            >
+              {value === "ALL" ? "All" : value}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loading ? (
+        <LoadingPlaceholder kind="chart" label="Loading portfolio chart" />
+      ) : (
+        <>
+          <div className="chart-context">
+            <span className={Number(change || 0) >= 0 ? "good" : "bad"}>
+              {signedMoney(change)}{" "}
+              {change !== null && (
+                <small>({signedPct(percent)}) value change</small>
+              )}
+            </span>
+            <span>
+              {first
+                ? `${shortDate(first.date)}${last !== first ? " – " + shortDate(last.date) : ""}`
+                : "No snapshots yet"}
+            </span>
+          </div>
+          {data.length > 1 ? (
+            <div className="chart-wrap performance-chart">
+              <ResponsiveContainer width="100%" height={280}>
+                <AreaChart
+                  data={data}
+                  accessibilityLayer
+                  margin={{ top: 16, right: 12, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={(value) =>
+                      shortDate(value).replace(/, \d{4}/, "")
+                    }
+                    minTickGap={48}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tickFormatter={compactMoney}
+                    width={68}
+                    axisLine={false}
+                    tickLine={false}
+                    domain={["auto", "auto"]}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "var(--panel)",
+                      border: "1px solid var(--line)",
+                      borderRadius: 10,
+                    }}
+                    labelFormatter={shortDate}
+                    formatter={(value) => [money(value), "Portfolio value"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="totalValue"
+                    name="Portfolio value"
+                    stroke="var(--blue)"
+                    fill="var(--blue)"
+                    fillOpacity={0.06}
+                    strokeWidth={2}
+                    isAnimationActive={false}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          ) : (
+            <div className="chart-empty">
+              <BarChart3 size={32} />
+              <strong>
+                {snapshots.length
+                  ? "More history is on the way"
+                  : unavailable ? "Portfolio history unavailable" : "Your portfolio story starts here"}
+              </strong>
+              <p>
+                {snapshots.length
+                  ? "There are fewer than two snapshots in this range. Choose a longer range or return after another daily snapshot."
+                  : unavailable ? "Reconnect and retry to load your saved history." : "Your first snapshot is saved when the portfolio refreshes. Come back on another day to see your history."}
+              </p>
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 }
 
 function BenchmarkPanel({ dashboard, benchmarks, loading, error, onRefresh }) {
   const benchmarkRows = benchmarks?.benchmarks || [];
-  const colors = ['var(--green)', 'var(--blue)', 'var(--warning)', 'var(--purple)'];
+  const colors = [
+    "var(--green)",
+    "var(--blue)",
+    "var(--warning)",
+    "var(--purple)",
+  ];
   const baseHistory = benchmarkRows[0]?.history?.slice(-90) || [];
-  const portfolioSnapshots = (dashboard?.snapshots || []).slice(-90).filter(row => Number(row.totalValue || 0) > 0);
+  const portfolioSnapshots = (dashboard?.snapshots || [])
+    .slice(-90)
+    .filter((row) => Number(row.totalValue || 0) > 0);
   const portfolioFirst = portfolioSnapshots[0]?.totalValue;
-  const portfolioByDate = new Map(portfolioSnapshots.map(row => [
-    String(row.date || '').slice(0, 10),
-    portfolioFirst ? ((Number(row.totalValue || 0) - Number(portfolioFirst)) / Number(portfolioFirst)) * 100 : null
-  ]));
-  const chartData = baseHistory.map(row => {
-    const dateKey = String(row.date || '').slice(0, 10);
+  const portfolioByDate = new Map(
+    portfolioSnapshots.map((row) => [
+      String(row.date || "").slice(0, 10),
+      portfolioFirst
+        ? ((Number(row.totalValue || 0) - Number(portfolioFirst)) /
+            Number(portfolioFirst)) *
+          100
+        : null,
+    ]),
+  );
+  const chartData = baseHistory.map((row) => {
+    const dateKey = String(row.date || "").slice(0, 10);
     const item = { date: dateKey.slice(5) };
-    benchmarkRows.forEach(benchmark => {
-      const match = (benchmark.history || []).find(point => String(point.date || '').slice(0, 10) === dateKey);
+    benchmarkRows.forEach((benchmark) => {
+      const match = (benchmark.history || []).find(
+        (point) => String(point.date || "").slice(0, 10) === dateKey,
+      );
       item[benchmark.symbol] = match?.normalized ?? null;
     });
-    if (portfolioByDate.has(dateKey)) item.Portfolio = portfolioByDate.get(dateKey);
+    if (portfolioByDate.has(dateKey))
+      item.Portfolio = portfolioByDate.get(dateKey);
     return item;
   });
-  const portfolioReturn = portfolioSnapshots.length > 1 && portfolioFirst
-    ? ((Number(portfolioSnapshots.at(-1).totalValue || 0) - Number(portfolioFirst)) / Number(portfolioFirst)) * 100
-    : null;
+  const portfolioReturn =
+    portfolioSnapshots.length > 1 && portfolioFirst
+      ? ((Number(portfolioSnapshots.at(-1).totalValue || 0) -
+          Number(portfolioFirst)) /
+          Number(portfolioFirst)) *
+        100
+      : null;
 
-  return <section className="panel benchmark-panel">
-    <div className="panel-head">
-      <div>
-        <h2>Benchmark Comparison</h2>
-        <p>Compares your saved portfolio history against common market ETFs.</p>
-      </div>
-      <button className="secondary" onClick={onRefresh}><RefreshCw size={16}/> Refresh</button>
-    </div>
-    {error && <div className="notice error inline-error">{error}</div>}
-    <div className="benchmark-stats">
-      <div className="benchmark-chip">
-        <span>Portfolio</span>
-        <strong className={Number(portfolioReturn || 0) >= 0 ? 'good' : 'bad'}>{portfolioReturn === null ? '--' : signedPct(portfolioReturn)}</strong>
-      </div>
-      {benchmarkRows.map((benchmark, index) => (
-        <div className="benchmark-chip" key={benchmark.symbol}>
-          <span><i style={{ background: colors[index % colors.length] }} />{benchmark.symbol}</span>
-          <strong className={Number(benchmark.returnPercent || 0) >= 0 ? 'good' : 'bad'}>{benchmark.returnPercent === null ? '--' : signedPct(benchmark.returnPercent)}</strong>
-          <small>{benchmark.name}</small>
+  return (
+    <section className="panel benchmark-panel">
+      <div className="panel-head">
+        <div>
+          <h2>Benchmark Comparison</h2>
+          <p>
+            Compares your saved portfolio history against common market ETFs.
+          </p>
         </div>
-      ))}
-    </div>
-    {loading ? <div className="empty-state">Loading benchmark data...</div> : chartData.length > 1 ? (
-      <div className="chart-wrap">
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={chartData} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" minTickGap={28} />
-            <YAxis tickFormatter={value => `${Number(value).toFixed(0)}%`} width={56} />
-            <Tooltip contentStyle={{ background: 'var(--panel)', border: '1px solid var(--line)', borderRadius: 10, color: 'var(--text)' }} labelStyle={{ color: 'var(--text)' }} formatter={(value, name) => [`${Number(value).toFixed(2)}%`, name]} />
-            <Area type="monotone" dataKey="Portfolio" name="Portfolio" stroke="var(--red)" fill="var(--red)" fillOpacity={0.08} strokeWidth={2} connectNulls />
-            {benchmarkRows.map((benchmark, index) => (
-              <Area key={benchmark.symbol} type="monotone" dataKey={benchmark.symbol} name={benchmark.symbol} stroke={colors[index % colors.length]} fill={colors[index % colors.length]} fillOpacity={0.10} strokeWidth={2} connectNulls />
-            ))}
-          </AreaChart>
-        </ResponsiveContainer>
+        <button className="secondary" onClick={onRefresh} disabled={loading}>
+          <RefreshCw size={16} /> Refresh
+        </button>
       </div>
-    ) : <div className="empty-state">No benchmark chart data loaded yet.</div>}
-  </section>;
+      <RetryNotice error={error} onRetry={onRefresh} loading={loading} />
+      <div className="benchmark-stats">
+        <div className="benchmark-chip">
+          <span>Portfolio</span>
+          <strong
+            className={Number(portfolioReturn || 0) >= 0 ? "good" : "bad"}
+          >
+            {portfolioReturn === null ? "--" : signedPct(portfolioReturn)}
+          </strong>
+        </div>
+        {benchmarkRows.map((benchmark, index) => (
+          <div className="benchmark-chip" key={benchmark.symbol}>
+            <span>
+              <i style={{ background: colors[index % colors.length] }} />
+              {benchmark.symbol}
+            </span>
+            <strong
+              className={
+                Number(benchmark.returnPercent || 0) >= 0 ? "good" : "bad"
+              }
+            >
+              {benchmark.returnPercent === null
+                ? "--"
+                : signedPct(benchmark.returnPercent)}
+            </strong>
+            <small>{benchmark.name}</small>
+          </div>
+        ))}
+      </div>
+      {loading ? (
+        <LoadingPlaceholder kind="chart" label="Loading benchmark data" />
+      ) : chartData.length > 1 ? (
+        <div className="chart-wrap">
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart
+              data={chartData}
+              margin={{ top: 10, right: 18, left: 0, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" minTickGap={28} />
+              <YAxis
+                tickFormatter={(value) => `${Number(value).toFixed(0)}%`}
+                width={56}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "var(--panel)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  color: "var(--text)",
+                }}
+                labelStyle={{ color: "var(--text)" }}
+                formatter={(value, name) => [
+                  `${Number(value).toFixed(2)}%`,
+                  name,
+                ]}
+              />
+              <Area
+                type="monotone"
+                dataKey="Portfolio"
+                name="Portfolio"
+                stroke="var(--red)"
+                fill="var(--red)"
+                fillOpacity={0.08}
+                strokeWidth={2}
+                connectNulls
+              />
+              {benchmarkRows.map((benchmark, index) => (
+                <Area
+                  key={benchmark.symbol}
+                  type="monotone"
+                  dataKey={benchmark.symbol}
+                  name={benchmark.symbol}
+                  stroke={colors[index % colors.length]}
+                  fill={colors[index % colors.length]}
+                  fillOpacity={0.1}
+                  strokeWidth={2}
+                  connectNulls
+                />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <div className="empty-state">No benchmark chart data loaded yet.</div>
+      )}
+    </section>
+  );
 }
 
 function CommandPalette({ open, query, actions, onQueryChange, onClose }) {
-  const filtered = actions.filter(action => action.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const filtered = actions.filter((action) =>
+    action.label.toLowerCase().includes(query.trim().toLowerCase()),
+  );
   if (!open) return null;
   function run(action) {
     action.run();
-    onQueryChange('');
+    onQueryChange("");
     onClose();
   }
-  return <div className="command-backdrop" onMouseDown={onClose}>
-    <section className="command-palette" onMouseDown={e => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Command palette">
-      <div className="command-input">
-        <Command size={18}/>
-        <input autoFocus placeholder="Search commands..." value={query} onChange={e => onQueryChange(e.target.value)} />
+  return (
+    <Dialog title="Commands" onClose={onClose}>
+      <div className="command-palette">
+        <div className="command-input">
+          <Command size={18} />
+          <input
+            autoFocus
+            placeholder="Search commands..."
+            value={query}
+            onChange={(e) => onQueryChange(e.target.value)}
+          />
+        </div>
+        <div className="command-list">
+          {filtered.map((action) => (
+            <button
+              type="button"
+              className="command-item"
+              key={action.label}
+              onClick={() => run(action)}
+            >
+              <span>{action.label}</span>
+              {action.hint && <kbd>{action.hint}</kbd>}
+            </button>
+          ))}
+          {!filtered.length && (
+            <div className="empty-state">No commands found.</div>
+          )}
+        </div>
       </div>
-      <div className="command-list">
-        {filtered.map(action => (
-          <button type="button" className="command-item" key={action.label} onClick={() => run(action)}>
-            <span>{action.label}</span>
-            {action.hint && <kbd>{action.hint}</kbd>}
-          </button>
-        ))}
-        {!filtered.length && <div className="empty-state">No commands found.</div>}
-      </div>
-    </section>
-  </div>;
+    </Dialog>
+  );
 }
 
 function BreakdownTab({ dashboard }) {
@@ -894,36 +1485,54 @@ function NewsGroup({ group }) {
 }
 
 function NewsTab({ news, loading, error, onRefresh }) {
-  return <div className="news-view">
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>Portfolio News</h2>
-          <p>Recent headlines for companies in your holdings.</p>
+  return (
+    <div className="news-view">
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Portfolio News</h2>
+            <p>Recent headlines for companies in your holdings.</p>
+          </div>
+          <button onClick={onRefresh}>
+            <RefreshCw size={16} /> Refresh News
+          </button>
         </div>
-        <button onClick={onRefresh}><RefreshCw size={16}/> Refresh News</button>
-      </div>
-      {loading && <div className="notice">Loading latest news...</div>}
-      {error && <div className="notice error">{error}</div>}
-      <div className="news-groups">
-        {(news?.portfolioGroups || []).map(group => <NewsGroup key={group.symbol} group={group} />)}
-      </div>
-      {!loading && !error && !(news?.portfolioGroups || []).length && <div className="empty-state">No portfolio headlines found.</div>}
-    </section>
+        {loading && <LoadingPlaceholder label="Loading latest news" />}
+        <RetryNotice error={error} onRetry={onRefresh} loading={loading} />
+        <div className="news-groups">
+          {(news?.portfolioGroups || []).map((group) => (
+            <NewsGroup key={group.symbol} group={group} />
+          ))}
+        </div>
+        {!loading && !error && !(news?.portfolioGroups || []).length && (
+          <div className="empty-state">No portfolio headlines found.</div>
+        )}
+      </section>
 
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>President / Policy News</h2>
-          <p>Market-relevant White House, economy, tariff, and regulation headlines.</p>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>President / Policy News</h2>
+            <p>
+              Market-relevant White House, economy, tariff, and regulation
+              headlines.
+            </p>
+          </div>
         </div>
-      </div>
-      <div className="news-grid policy-news">
-        {(news?.policyNews || []).map(article => <NewsCard key={`${article.title}-${article.link}`} article={article} />)}
-      </div>
-      {!loading && !error && !(news?.policyNews || []).length && <div className="empty-state">No policy headlines found.</div>}
-    </section>
-  </div>;
+        <div className="news-grid policy-news">
+          {(news?.policyNews || []).map((article) => (
+            <NewsCard
+              key={`${article.title}-${article.link}`}
+              article={article}
+            />
+          ))}
+        </div>
+        {!loading && !error && !(news?.policyNews || []).length && (
+          <div className="empty-state">No policy headlines found.</div>
+        )}
+      </section>
+    </div>
+  );
 }
 
 function EarningsHistoryCharts({ rows }) {
@@ -969,121 +1578,197 @@ function EarningsHistoryCharts({ rows }) {
 }
 
 function EarningsTab({ dashboard, earningsNews, loading, error, onRefresh }) {
-  const [earningsSort, setEarningsSort] = useState({ key: 'value', dir: 'desc' });
-  const reportBySymbol = Object.fromEntries((earningsNews?.reports || []).map(report => [report.symbol, report]));
-  const rows = useMemo(() => (dashboard?.holdings || [])
-    .map(holding => {
-      const report = reportBySymbol[holding.symbol] || {};
-      return {
-        symbol: holding.symbol,
-        name: holding.name,
-        value: holding.value,
-        isFund: report.isFund,
-        quoteType: report.quoteType,
-        status: report.status,
-        reportDate: report.reportDate || null,
-        reportDateSource: report.reportDateSource || null,
-        period: report.period || null,
-        epsActual: report.epsActual,
-        epsEstimate: report.epsEstimate,
-        surprisePercent: report.surprisePercent,
-        revenue: report.revenue,
-        growth: report.growth,
-        growthBasis: report.growthBasis,
-        history: report.history || [],
-        source: report.source || null
-      };
-    })
-    .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol))), [dashboard, earningsNews]);
+  const [earningsSort, setEarningsSort] = useState({
+    key: "value",
+    dir: "desc",
+  });
+  const reportBySymbol = Object.fromEntries(
+    (earningsNews?.reports || []).map((report) => [report.symbol, report]),
+  );
+  const rows = useMemo(
+    () =>
+      (dashboard?.holdings || [])
+        .map((holding) => {
+          const report = reportBySymbol[holding.symbol] || {};
+          return {
+            symbol: holding.symbol,
+            name: holding.name,
+            value: holding.value,
+            isFund: report.isFund,
+            quoteType: report.quoteType,
+            status: report.status,
+            reportDate: report.reportDate || null,
+            reportDateSource: report.reportDateSource || null,
+            period: report.period || null,
+            epsActual: report.epsActual,
+            epsEstimate: report.epsEstimate,
+            surprisePercent: report.surprisePercent,
+            revenue: report.revenue,
+            growth: report.growth,
+            growthBasis: report.growthBasis,
+            history: report.history || [],
+            source: report.source || null,
+          };
+        })
+        .sort((a, b) => String(a.symbol).localeCompare(String(b.symbol))),
+    [dashboard, earningsNews],
+  );
   const earningsColumns = [
-    { key: 'symbol', label: 'Symbol', type: 'text' },
-    { key: 'reportDate', label: 'Report Date', type: 'date' },
-    { key: 'period', label: 'Fiscal Period', type: 'date' },
-    { key: 'epsActual', label: 'EPS', type: 'number' },
-    { key: 'revenue', label: 'Revenue', type: 'number' },
-    { key: 'growth', label: 'Growth', type: 'number' },
-    { key: 'growthBasis', label: 'Basis', type: 'text' },
-    { key: 'source', label: 'Source', type: 'text' },
-    { key: 'value', label: 'Position', type: 'number' }
+    { key: "symbol", label: "Symbol", type: "text" },
+    { key: "reportDate", label: "Report Date", type: "date" },
+    { key: "period", label: "Fiscal Period", type: "date" },
+    { key: "epsActual", label: "EPS", type: "number" },
+    { key: "revenue", label: "Revenue", type: "number" },
+    { key: "growth", label: "Growth", type: "number" },
+    { key: "growthBasis", label: "Basis", type: "text" },
+    { key: "source", label: "Source", type: "text" },
+    { key: "value", label: "Position", type: "number" },
   ];
   const sortedRows = useMemo(() => {
-    const column = earningsColumns.find(item => item.key === earningsSort.key) || earningsColumns[0];
-    const direction = earningsSort.dir === 'asc' ? 1 : -1;
+    const column =
+      earningsColumns.find((item) => item.key === earningsSort.key) ||
+      earningsColumns[0];
+    const direction = earningsSort.dir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
       const aValue = a[column.key];
       const bValue = b[column.key];
-      const aMissing = aValue === null || aValue === undefined || aValue === '';
-      const bMissing = bValue === null || bValue === undefined || bValue === '';
-      if (aMissing && bMissing) return String(a.symbol).localeCompare(String(b.symbol));
+      const aMissing = aValue === null || aValue === undefined || aValue === "";
+      const bMissing = bValue === null || bValue === undefined || bValue === "";
+      if (aMissing && bMissing)
+        return String(a.symbol).localeCompare(String(b.symbol));
       if (aMissing) return 1;
       if (bMissing) return -1;
-      if (column.type === 'number') {
+      if (column.type === "number") {
         const diff = Number(aValue) - Number(bValue);
-        return diff === 0 ? String(a.symbol).localeCompare(String(b.symbol)) : diff * direction;
+        return diff === 0
+          ? String(a.symbol).localeCompare(String(b.symbol))
+          : diff * direction;
       }
-      if (column.type === 'date') {
+      if (column.type === "date") {
         const diff = new Date(aValue).getTime() - new Date(bValue).getTime();
-        return diff === 0 ? String(a.symbol).localeCompare(String(b.symbol)) : diff * direction;
+        return diff === 0
+          ? String(a.symbol).localeCompare(String(b.symbol))
+          : diff * direction;
       }
       const diff = String(aValue).localeCompare(String(bValue));
-      return diff === 0 ? String(a.symbol).localeCompare(String(b.symbol)) : diff * direction;
+      return diff === 0
+        ? String(a.symbol).localeCompare(String(b.symbol))
+        : diff * direction;
     });
   }, [rows, earningsSort]);
   function setEarningsColumn(key) {
-    setEarningsSort(current => current.key === key
-      ? { key, dir: current.dir === 'desc' ? 'asc' : 'desc' }
-      : { key, dir: 'desc' });
+    setEarningsSort((current) =>
+      current.key === key
+        ? { key, dir: current.dir === "desc" ? "asc" : "desc" }
+        : { key, dir: "desc" },
+    );
   }
 
-  const withInfo = rows.filter(row => row.period || row.epsActual !== null || row.revenue !== null || row.growth !== null);
+  const withInfo = rows.filter(
+    (row) =>
+      row.period ||
+      row.epsActual !== null ||
+      row.revenue !== null ||
+      row.growth !== null,
+  );
   const growthRows = rows
-    .map(row => ({ ...row, growthValue: Number(row.growth) }))
-    .filter(row => Number.isFinite(row.growthValue))
+    .map((row) => ({ ...row, growthValue: Number(row.growth) }))
+    .filter((row) => Number.isFinite(row.growthValue))
     .sort((a, b) => b.growthValue - a.growthValue);
 
-  return <div className="earnings-view">
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>Latest Earnings Info</h2>
-          <p>Last reported fiscal quarter from Yahoo, with SEC fallback when Yahoo is stale.</p>
+  return (
+    <div className="earnings-view">
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Latest Earnings Info</h2>
+            <p>
+              Last reported fiscal quarter from Yahoo, with SEC fallback when
+              Yahoo is stale.
+            </p>
+          </div>
+          <button onClick={onRefresh}>
+            <RefreshCw size={16} /> Refresh Earnings
+          </button>
         </div>
-        <button onClick={onRefresh}><RefreshCw size={16}/> Refresh Earnings</button>
-      </div>
-      {loading && <div className="notice">Loading latest earnings reports...</div>}
-      {error && <div className="notice error">{error}</div>}
-      <div className="projection-summary">
-        <StatCard label="With Reports" value={num(withInfo.length, 0)} sub={`${num(rows.length, 0)} holdings tracked`} />
-        <StatCard label="Highest Reported Growth" value={growthRows[0]?.symbol || '--'} sub={growthRows[0] ? `${signedPct(growthRows[0].growthValue)} ${growthRows[0].growthBasis || ''}` : 'No growth data'} positive={Number(growthRows[0]?.growthValue || 0) >= 0} />
-        <StatCard label="Tracked Holdings" value={num(rows.length, 0)} />
-        <StatCard label="Missing Info" value={num(rows.length - withInfo.length, 0)} />
-      </div>
-      <div className="earnings-table full-table">
-        <div className="earnings-row head">
-          {earningsColumns.map(column => (
-            <button type="button" key={column.key} className="table-sort" onClick={() => setEarningsColumn(column.key)}>
-              <span>{column.label}</span>
-              <span className={earningsSort.key === column.key ? 'sort-arrow active' : 'sort-arrow'}>{earningsSort.key === column.key && earningsSort.dir === 'asc' ? '↑' : '↓'}</span>
-            </button>
+        {loading && <LoadingPlaceholder label="Loading earnings reports" />}
+        <RetryNotice error={error} onRetry={onRefresh} loading={loading} />
+        <div className="projection-summary">
+          <StatCard
+            label="With Reports"
+            value={num(withInfo.length, 0)}
+            sub={`${num(rows.length, 0)} holdings tracked`}
+          />
+          <StatCard
+            label="Highest Reported Growth"
+            value={growthRows[0]?.symbol || "--"}
+            sub={
+              growthRows[0]
+                ? `${signedPct(growthRows[0].growthValue)} ${growthRows[0].growthBasis || ""}`
+                : "No growth data"
+            }
+            positive={Number(growthRows[0]?.growthValue || 0) >= 0}
+          />
+          <StatCard label="Tracked Holdings" value={num(rows.length, 0)} />
+          <StatCard
+            label="Missing Info"
+            value={num(rows.length - withInfo.length, 0)}
+          />
+        </div>
+        <div className="earnings-table full-table">
+          <div className="earnings-row head">
+            {earningsColumns.map((column) => (
+              <button
+                type="button"
+                key={column.key}
+                className="table-sort"
+                onClick={() => setEarningsColumn(column.key)}
+              >
+                <span>{column.label}</span>
+                <span
+                  className={
+                    earningsSort.key === column.key
+                      ? "sort-arrow active"
+                      : "sort-arrow"
+                  }
+                >
+                  {earningsSort.key === column.key && earningsSort.dir === "asc"
+                    ? "↑"
+                    : "↓"}
+                </span>
+              </button>
+            ))}
+          </div>
+          {sortedRows.map((row) => (
+            <div className="earnings-row" key={row.symbol}>
+              <strong>{row.symbol}</strong>
+              <span
+                title={
+                  row.reportDateSource
+                    ? `Report date source: ${row.reportDateSource}`
+                    : ""
+                }
+              >
+                {row.reportDate || "--"}
+              </span>
+              <span>{row.period || (row.isFund ? "ETF / fund" : "--")}</span>
+              <span>{num(row.epsActual, 2)}</span>
+              <span>{compactMoney(row.revenue)}</span>
+              <span className={Number(row.growth || 0) >= 0 ? "good" : "bad"}>
+                {row.growth === null || row.growth === undefined
+                  ? row.growthBasis || "--"
+                  : signedPct(row.growth)}
+              </span>
+              <span>{row.growthBasis || "--"}</span>
+              <span>{row.source || "--"}</span>
+              <span>{money(row.value)}</span>
+            </div>
           ))}
         </div>
-        {sortedRows.map(row => (
-          <div className="earnings-row" key={row.symbol}>
-            <strong>{row.symbol}</strong>
-            <span title={row.reportDateSource ? `Report date source: ${row.reportDateSource}` : ''}>{row.reportDate || '--'}</span>
-            <span>{row.period || (row.isFund ? 'ETF / fund' : '--')}</span>
-            <span>{num(row.epsActual, 2)}</span>
-            <span>{compactMoney(row.revenue)}</span>
-            <span className={Number(row.growth || 0) >= 0 ? 'good' : 'bad'}>{row.growth === null || row.growth === undefined ? (row.growthBasis || '--') : signedPct(row.growth)}</span>
-            <span>{row.growthBasis || '--'}</span>
-            <span>{row.source || '--'}</span>
-            <span>{money(row.value)}</span>
-          </div>
-        ))}
-      </div>
-      <EarningsHistoryCharts rows={rows} />
-    </section>
-  </div>;
+        <EarningsHistoryCharts rows={rows} />
+      </section>
+    </div>
+  );
 }
 
 function sortValue(holding, sortBy) {
@@ -1099,104 +1784,147 @@ function sortValue(holding, sortBy) {
 function App() {
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [form, setForm] = useState({ symbol: '', shares: '', avgCost: '' });
-  const [activeTab, setActiveTab] = useState('holdings');
-  const [holdingView, setHoldingView] = useState(() => storageValue('holdingView', 'cards'));
-  const [holdingSearch, setHoldingSearch] = useState('');
-  const [pinnedSymbols, setPinnedSymbols] = useState(() => storageJson('pinnedHoldings', []));
-  const [cashForm, setCashForm] = useState('');
-  const [theme, setTheme] = useState(() => storageValue('theme', window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') === 'light' ? 'light' : 'dark');
-  const [sortBy, setSortBy] = useState('value');
-  const [sortDir, setSortDir] = useState('desc');
-  const [sortOpen, setSortOpen] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState(() => storageJson('visibleHoldingColumns', DEFAULT_HOLDING_COLUMNS));
-  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [form, setForm] = useState({ symbol: "", shares: "", avgCost: "" });
+  const [activeTab, setActiveTab] = useState("holdings");
+  const [holdingView, setHoldingView] = useState(() =>
+    storageValue("holdingView", "table"),
+  );
+  const [holdingSearch, setHoldingSearch] = useState("");
+  const [pinnedSymbols, setPinnedSymbols] = useState(() =>
+    storageJson("pinnedHoldings", []),
+  );
+  const [cashForm, setCashForm] = useState("");
+  const [theme, setTheme] = useState(() =>
+    storageValue(
+      "theme",
+      window.matchMedia("(prefers-color-scheme: light)").matches
+        ? "light"
+        : "dark",
+    ) === "light"
+      ? "light"
+      : "dark",
+  );
+  const [sortBy, setSortBy] = useState("value");
+  const [sortDir, setSortDir] = useState("desc");
+  const [dialog, setDialog] = useState(null);
+  const [selectedSymbol, setSelectedSymbol] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [visibleColumns, setVisibleColumns] = useState(() =>
+    storageJson("visibleHoldingColumns", DEFAULT_HOLDING_COLUMNS),
+  );
   const [commandOpen, setCommandOpen] = useState(false);
-  const [commandQuery, setCommandQuery] = useState('');
+  const [commandQuery, setCommandQuery] = useState("");
   const [benchmarks, setBenchmarks] = useState(null);
   const [benchmarkLoading, setBenchmarkLoading] = useState(false);
-  const [benchmarkError, setBenchmarkError] = useState('');
+  const [benchmarkError, setBenchmarkError] = useState("");
   const [news, setNews] = useState(null);
   const [newsLoading, setNewsLoading] = useState(false);
-  const [newsError, setNewsError] = useState('');
+  const [newsError, setNewsError] = useState("");
   const [earningsNews, setEarningsNews] = useState(null);
   const [earningsLoading, setEarningsLoading] = useState(false);
-  const [earningsError, setEarningsError] = useState('');
+  const [earningsError, setEarningsError] = useState("");
   const importInputRef = useRef(null);
   const searchInputRef = useRef(null);
+  const dashboardRequest = useRef(0);
 
   async function loadDashboard() {
+    const request = ++dashboardRequest.current;
     setLoading(true);
-    setError('');
+    setError("");
     try {
-      const res = await fetch(`${API}/api/dashboard`);
+      const res = await fetchWithTimeout(`${API}/api/dashboard`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not load dashboard');
-      setDashboard(data);
+      if (!res.ok) throw new Error(data.error || "Could not load dashboard");
+      if (request === dashboardRequest.current) setDashboard(data);
+      return true;
     } catch (e) {
-      setError(e.message);
+      if (request === dashboardRequest.current) setError(e.message);
+      return false;
     } finally {
-      setLoading(false);
+      if (request === dashboardRequest.current) setLoading(false);
     }
   }
 
-  useEffect(() => { loadDashboard(); }, []);
+  useEffect(() => {
+    loadDashboard();
+  }, []);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    try { localStorage.setItem('theme', theme); } catch {}
+    try {
+      localStorage.setItem("theme", theme);
+    } catch {}
   }, [theme]);
   useEffect(() => {
-    setCashForm(dashboard?.cashBalance ?? '');
+    setCashForm(dashboard?.cashBalance ?? "");
   }, [dashboard?.cashBalance]);
   useEffect(() => {
-    try { localStorage.setItem('holdingView', holdingView); } catch {}
+    try {
+      localStorage.setItem("holdingView", holdingView);
+    } catch {}
   }, [holdingView]);
   useEffect(() => {
-    try { localStorage.setItem('pinnedHoldings', JSON.stringify(pinnedSymbols)); } catch {}
+    try {
+      localStorage.setItem("pinnedHoldings", JSON.stringify(pinnedSymbols));
+    } catch {}
   }, [pinnedSymbols]);
   useEffect(() => {
-    try { localStorage.setItem('visibleHoldingColumns', JSON.stringify(visibleColumns)); } catch {}
+    try {
+      localStorage.setItem(
+        "visibleHoldingColumns",
+        JSON.stringify(visibleColumns),
+      );
+    } catch {}
   }, [visibleColumns]);
   useEffect(() => {
     function onKeyDown(e) {
       const target = e.target;
-      const isTyping = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.tagName === 'SELECT';
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (target?.closest("dialog")) return;
+      const isTyping =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT";
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandOpen(true);
         return;
       }
-      if (commandOpen && e.key === 'Escape') {
+      if (commandOpen && e.key === "Escape") {
         setCommandOpen(false);
-        setCommandQuery('');
+        setCommandQuery("");
         return;
       }
-      if (isTyping && e.key !== 'Escape') return;
-      if (e.key === '/') {
+      if (isTyping && e.key !== "Escape") return;
+      if (e.key === "/") {
         e.preventDefault();
-        setActiveTab('holdings');
+        setActiveTab("holdings");
         setTimeout(() => searchInputRef.current?.focus(), 0);
-      } else if (e.key.toLowerCase() === 'r') {
+      } else if (e.key.toLowerCase() === "r") {
         loadDashboard();
-      } else if (['1', '2', '3', '4'].includes(e.key)) {
-        setActiveTab(['holdings', 'breakdown', 'earnings', 'news'][Number(e.key) - 1]);
-      } else if (e.key === 'Escape') {
-        setSortOpen(false);
-        setColumnsOpen(false);
+      } else if (["1", "2", "3", "4"].includes(e.key)) {
+        setActiveTab(
+          ["holdings", "breakdown", "earnings", "news"][Number(e.key) - 1],
+        );
+      } else if (e.key === "Escape") {
+        document
+          .querySelectorAll("details.action-menu[open]")
+          .forEach((menu) => menu.removeAttribute("open"));
       }
     }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [commandOpen]);
 
   async function loadBenchmarks() {
     setBenchmarkLoading(true);
-    setBenchmarkError('');
+    setBenchmarkError("");
     try {
-      const res = await fetch(`${API}/api/benchmarks?symbols=SPY,QQQ,VOO`);
+      const res = await fetchWithTimeout(
+        `${API}/api/benchmarks?symbols=SPY,QQQ,VOO`,
+      );
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not load benchmarks');
+      if (!res.ok) throw new Error(data.error || "Could not load benchmarks");
       setBenchmarks(data);
     } catch (e) {
       setBenchmarkError(e.message);
@@ -1206,16 +1934,22 @@ function App() {
   }
 
   useEffect(() => {
-    if (activeTab === 'holdings' && !benchmarks && !benchmarkLoading) loadBenchmarks();
-  }, [activeTab, benchmarks, benchmarkLoading]);
+    if (
+      activeTab === "holdings" &&
+      !benchmarks &&
+      !benchmarkLoading &&
+      !benchmarkError
+    )
+      loadBenchmarks();
+  }, [activeTab, benchmarks, benchmarkLoading, benchmarkError]);
 
   async function loadNews() {
     setNewsLoading(true);
-    setNewsError('');
+    setNewsError("");
     try {
-      const res = await fetch(`${API}/api/news`);
+      const res = await fetchWithTimeout(`${API}/api/news`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not load news');
+      if (!res.ok) throw new Error(data.error || "Could not load news");
       setNews(data);
     } catch (e) {
       setNewsError(e.message);
@@ -1225,16 +1959,17 @@ function App() {
   }
 
   useEffect(() => {
-    if (activeTab === 'news' && !news && !newsLoading) loadNews();
-  }, [activeTab, news, newsLoading]);
+    if (activeTab === "news" && !news && !newsLoading && !newsError) loadNews();
+  }, [activeTab, news, newsLoading, newsError]);
 
   async function loadEarningsNews() {
     setEarningsLoading(true);
-    setEarningsError('');
+    setEarningsError("");
     try {
-      const res = await fetch(`${API}/api/earnings`);
+      const res = await fetchWithTimeout(`${API}/api/earnings`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not load earnings news');
+      if (!res.ok)
+        throw new Error(data.error || "Could not load earnings news");
       setEarningsNews(data);
     } catch (e) {
       setEarningsError(e.message);
@@ -1244,268 +1979,747 @@ function App() {
   }
 
   useEffect(() => {
-    if (activeTab === 'earnings' && !earningsLoading && !earningsNews?.reports) loadEarningsNews();
-  }, [activeTab, earningsNews, earningsLoading]);
+    if (
+      activeTab === "earnings" &&
+      !earningsLoading &&
+      !earningsNews?.reports &&
+      !earningsError
+    )
+      loadEarningsNews();
+  }, [activeTab, earningsNews, earningsLoading, earningsError]);
 
-  async function addHolding(e) {
-    e.preventDefault();
-    await updateHolding(form, true);
+  function openHolding(holding) {
+    setForm(
+      holding
+        ? {
+            symbol: holding.symbol,
+            shares: holding.shares,
+            avgCost: holding.avgCost,
+          }
+        : { symbol: "", shares: "", avgCost: "" },
+    );
+    setFormError("");
+    setDialog(holding ? "edit" : "add");
   }
-
-  async function updateHolding(item, clearForm = false) {
-    const res = await fetch(`${API}/api/portfolio`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item)
-    });
-    if (res.ok) {
-      if (clearForm) setForm({ symbol: '', shares: '', avgCost: '' });
+  async function updateHolding(item) {
+    try {
+      const res = await fetchWithTimeout(`${API}/api/portfolio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(item),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Could not save holding");
+      }
       await loadDashboard();
-    } else {
-      const data = await res.json();
-      setError(data.error || 'Could not save holding');
+      return true;
+    } catch (e) {
+      setError(e.message);
+      return false;
     }
   }
-
+  async function submitHolding(event) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError("");
+    try {
+      const res = await fetchWithTimeout(`${API}/api/portfolio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Could not save holding");
+      }
+      setDialog(null);
+      await loadDashboard();
+    } catch (e) {
+      setFormError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
   async function deleteHolding(symbol) {
-    await fetch(`${API}/api/portfolio/${symbol}`, { method: 'DELETE' });
-    loadDashboard();
-  }
-
-  async function saveCash(e) {
-    e.preventDefault();
-    const res = await fetch(`${API}/api/settings/cash`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cashBalance: cashForm })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || 'Could not save cash balance');
-      return;
+    try {
+      const res = await fetchWithTimeout(
+        `${API}/api/portfolio/${encodeURIComponent(symbol)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok)
+        throw new Error("Could not remove holding. Please try again.");
+      if (selectedSymbol === symbol) setSelectedSymbol("");
+      await loadDashboard();
+    } catch (e) {
+      setError(e.message);
     }
-    await loadDashboard();
+  }
+  async function saveCash(event) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError("");
+    try {
+      const res = await fetchWithTimeout(`${API}/api/settings/cash`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cashBalance: cashForm }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save cash balance");
+      setDialog(null);
+      await loadDashboard();
+    } catch (e) {
+      setFormError(e.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function togglePinned(symbol) {
-    setPinnedSymbols(current => current.includes(symbol)
-      ? current.filter(item => item !== symbol)
-      : [...current, symbol]);
+    setPinnedSymbols((current) =>
+      current.includes(symbol)
+        ? current.filter((item) => item !== symbol)
+        : [...current, symbol],
+    );
   }
 
   function exportJson() {
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadText(`portfolio-backup-${stamp}.json`, JSON.stringify(dashboard || {}, null, 2), 'application/json');
+    downloadText(
+      `portfolio-backup-${stamp}.json`,
+      JSON.stringify(dashboard || {}, null, 2),
+      "application/json",
+    );
   }
 
   function exportCsv() {
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadText(`portfolio-holdings-${stamp}.csv`, dashboardToCsv(dashboard), 'text/csv');
+    downloadText(
+      `portfolio-holdings-${stamp}.csv`,
+      dashboardToCsv(dashboard),
+      "text/csv",
+    );
   }
 
   async function importJson(event) {
     const file = event.target.files?.[0];
-    event.target.value = '';
+    event.target.value = "";
     if (!file) return;
 
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-      const res = await fetch(`${API}/api/portfolio/import`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed)
+      const res = await fetchWithTimeout(`${API}/api/portfolio/import`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not import portfolio');
+      if (!res.ok) throw new Error(data.error || "Could not import portfolio");
       setNews(null);
       setEarningsNews(null);
       await loadDashboard();
     } catch (e) {
-      setError(e.message || 'Could not import portfolio');
+      setError(e.message || "Could not import portfolio");
     }
   }
 
   const visibleHoldings = useMemo(() => {
     const query = holdingSearch.trim().toLowerCase();
-    return (dashboard?.holdings || []).filter(holding => !query
-      || holding.symbol.toLowerCase().includes(query)
-      || String(holding.name || '').toLowerCase().includes(query)
-      || sectorForHolding(holding).toLowerCase().includes(query));
+    return (dashboard?.holdings || []).filter(
+      (holding) =>
+        !query ||
+        holding.symbol.toLowerCase().includes(query) ||
+        String(holding.name || "")
+          .toLowerCase()
+          .includes(query) ||
+        sectorForHolding(holding).toLowerCase().includes(query),
+    );
   }, [dashboard, holdingSearch]);
 
   const sortedHoldings = useMemo(() => {
-    const direction = sortDir === 'asc' ? 1 : -1;
+    const direction = sortDir === "asc" ? 1 : -1;
     return [...visibleHoldings].sort((a, b) => {
-      const pinDiff = Number(pinnedSymbols.includes(b.symbol)) - Number(pinnedSymbols.includes(a.symbol));
+      const pinDiff =
+        Number(pinnedSymbols.includes(b.symbol)) -
+        Number(pinnedSymbols.includes(a.symbol));
       if (pinDiff !== 0) return pinDiff;
       const diff = sortValue(a, sortBy) - sortValue(b, sortBy);
       if (diff !== 0) return diff * direction;
       return String(a.symbol).localeCompare(String(b.symbol));
     });
   }, [visibleHoldings, pinnedSymbols, sortBy, sortDir]);
-  const selectedSort = SORT_OPTIONS.find(option => option.value === sortBy) || SORT_OPTIONS[0];
   function toggleColumn(key) {
-    setVisibleColumns(current => {
+    setVisibleColumns((current) => {
       if (current.includes(key)) {
-        const next = current.filter(item => item !== key);
+        const next = current.filter((item) => item !== key);
         return next.length ? next : current;
       }
       return [...current, key];
     });
   }
   const commandActions = [
-    { label: 'Refresh dashboard', hint: 'R', run: loadDashboard },
-    { label: 'Go to Holdings', hint: '1', run: () => setActiveTab('holdings') },
-    { label: 'Go to Portfolio Breakdown', hint: '2', run: () => setActiveTab('breakdown') },
-    { label: 'Go to Earnings', hint: '3', run: () => setActiveTab('earnings') },
-    { label: 'Go to News', hint: '4', run: () => setActiveTab('news') },
-    { label: 'Focus holdings search', hint: '/', run: () => { setActiveTab('holdings'); setTimeout(() => searchInputRef.current?.focus(), 0); } },
-    { label: 'Switch to card view', run: () => setHoldingView('cards') },
-    { label: 'Switch to table view', run: () => setHoldingView('table') },
-    { label: 'Toggle theme', run: () => setTheme(current => current === 'dark' ? 'light' : 'dark') },
-    { label: 'Refresh benchmarks', run: loadBenchmarks },
-    { label: 'Export JSON', run: exportJson },
-    { label: 'Export CSV', run: exportCsv }
+    { label: "Add holding", run: () => openHolding() },
+    {
+      label: "Edit cash balance",
+      run: () => {
+        setCashForm(dashboard?.cashBalance ?? "");
+        setFormError("");
+        setDialog("cash");
+      },
+    },
+    { label: "Refresh dashboard", hint: "R", run: loadDashboard },
+    { label: "Go to Holdings", hint: "1", run: () => setActiveTab("holdings") },
+    {
+      label: "Go to Portfolio Breakdown",
+      hint: "2",
+      run: () => setActiveTab("breakdown"),
+    },
+    { label: "Go to Earnings", hint: "3", run: () => setActiveTab("earnings") },
+    { label: "Go to News", hint: "4", run: () => setActiveTab("news") },
+    {
+      label: "Focus holdings search",
+      hint: "/",
+      run: () => {
+        setActiveTab("holdings");
+        setTimeout(() => searchInputRef.current?.focus(), 0);
+      },
+    },
+    { label: "Switch to card view", run: () => setHoldingView("cards") },
+    { label: "Switch to table view", run: () => setHoldingView("table") },
+    {
+      label: "Toggle theme",
+      run: () => setTheme((current) => (current === "dark" ? "light" : "dark")),
+    },
+    { label: "Refresh benchmarks", run: loadBenchmarks },
+    { label: "Export JSON", run: exportJson },
+    { label: "Export CSV", run: exportCsv },
   ];
 
-  return <main>
-    <header className="app-header">
-      <div>
-        <p className="eyebrow">Portfolio Stock Tracker</p>
-        <h1>Your portfolio</h1>
-      </div>
-      <div className="header-actions">
-        <button onClick={() => setCommandOpen(true)} title="Open command palette"><Command size={18}/> Commands</button>
-        <button onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')} title="Toggle theme" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-          {theme === 'dark' ? <Sun size={18}/> : <Moon size={18}/>} {theme === 'dark' ? 'Light' : 'Dark'}
-        </button>
-        <input ref={importInputRef} className="file-input" type="file" accept=".json,application/json" onChange={importJson} />
-        <button onClick={() => importInputRef.current?.click()}><Upload size={18}/> Import</button>
-        <button onClick={exportJson} disabled={!dashboard}><Download size={18}/> JSON</button>
-        <button onClick={exportCsv} disabled={!dashboard}><Download size={18}/> CSV</button>
-        <button className="refresh" onClick={loadDashboard}><RefreshCw size={18}/> Refresh</button>
-      </div>
-    </header>
-
-    <section className="summary">
-      <StatCard label="Total Value" value={money(dashboard?.totalValue)} sub={dashboard?.cashBalance ? `Cash ${money(dashboard.cashBalance)} - Updated ${new Date(dashboard.updatedAt).toLocaleString()}` : dashboard?.updatedAt ? `Updated ${new Date(dashboard.updatedAt).toLocaleString()}` : ''} />
-      <StatCard label="Total Cost" value={money(dashboard?.totalCost)} />
-      <StatCard label="Portfolio Day Change" value={signedMoney(dashboard?.dayValueChange)} sub={signedPct(dashboard?.dayValueChangePercent)} positive={Number(dashboard?.dayValueChange || 0) >= 0} />
-      <StatCard label="Total Gain / Loss" value={money(dashboard?.totalGain)} sub={pct(dashboard?.totalGainPercent)} positive={Number(dashboard?.totalGain || 0) >= 0} />
-      <form className="stat-card cash-card" onSubmit={saveCash}>
-        <span>Cash Balance</span>
-        <div className="cash-edit">
-          <Wallet size={21}/>
-          <input type="number" step="any" value={cashForm} onChange={e => setCashForm(e.target.value)} aria-label="Cash balance" />
-          <button title="Save cash"><Save size={16}/></button>
+  const selectedHolding = dashboard?.holdings?.find(
+    (h) => h.symbol === selectedSymbol,
+  );
+  const unavailableCount =
+    dashboard?.holdings?.filter((h) => h.dataStatus === "error").length || 0;
+  const firstLoad = loading && !dashboard;
+  return (
+    <main>
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Portfolio Stock Tracker</p>
+          <h1>Your portfolio</h1>
         </div>
-        <small>{dashboard?.holdings?.length || 0} holdings tracked</small>
-      </form>
-    </section>
-
-    <form className="add-form" onSubmit={addHolding}>
-      <input aria-label="Ticker symbol" placeholder="Ticker e.g. TSLA" value={form.symbol} onChange={e => setForm({ ...form, symbol: e.target.value })}/>
-      <input aria-label="Shares" placeholder="Shares" type="number" step="any" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })}/>
-      <input aria-label="Average cost" placeholder="Average cost" type="number" step="any" value={form.avgCost} onChange={e => setForm({ ...form, avgCost: e.target.value })}/>
-      <button><Plus size={18}/> Add / Update</button>
-    </form>
-
-    {loading && <div className="notice">Loading online stock data...</div>}
-    {error && <div className="notice error">{error}</div>}
-
-    <div className="tabs-row">
-      <nav className="tabs" aria-label="Dashboard views">
-        <button className={activeTab === 'holdings' ? 'active' : ''} onClick={() => setActiveTab('holdings')}><BriefcaseBusiness size={18}/> Holdings</button>
-        <button className={activeTab === 'breakdown' ? 'active' : ''} onClick={() => setActiveTab('breakdown')}><BarChart3 size={18}/> Portfolio Breakdown</button>
-        <button className={activeTab === 'earnings' ? 'active' : ''} onClick={() => setActiveTab('earnings')}><CalendarDays size={18}/> Earnings</button>
-        <button className={activeTab === 'news' ? 'active' : ''} onClick={() => setActiveTab('news')}><Newspaper size={18}/> News</button>
-      </nav>
-        <div className={`sort-controls ${activeTab === 'holdings' ? '' : 'ghost'}`} aria-hidden={activeTab !== 'holdings'}>
-          <label htmlFor="holding-sort">Sort</label>
-          <div className="custom-select" id="holding-sort">
+        <div className="header-actions">
+          <button
+            className="icon"
+            onClick={() => setCommandOpen(true)}
+            title="Commands (Ctrl+K)"
+            aria-label="Open commands"
+          >
+            <Command size={18} />
+          </button>
+          <button
+            className="icon"
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            title="Toggle theme"
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <input
+            ref={importInputRef}
+            className="file-input"
+            type="file"
+            accept=".json,application/json"
+            onChange={importJson}
+          />
+          <ActionMenu label="Manage">
             <button
-              type="button"
-              className={`custom-select-trigger ${sortOpen ? 'open' : ''}`}
-              disabled={activeTab !== 'holdings'}
-              aria-haspopup="listbox"
-              aria-expanded={sortOpen}
-              onClick={() => setSortOpen(open => !open)}
+              onClick={() => {
+                setCashForm(dashboard?.cashBalance ?? "");
+                setFormError("");
+                setDialog("cash");
+              }}
             >
-              <span>{selectedSort.label}</span>
-              <span className="chevron">v</span>
+              <Wallet size={16} /> Edit cash balance
             </button>
-            {sortOpen && activeTab === 'holdings' && (
-              <div className="custom-select-menu" role="listbox">
-                {SORT_OPTIONS.map(option => (
+            <button onClick={() => importInputRef.current?.click()}>
+              <Upload size={16} /> Import portfolio
+            </button>
+            <button onClick={exportJson} disabled={!dashboard}>
+              <Download size={16} /> Export JSON
+            </button>
+            <button onClick={exportCsv} disabled={!dashboard}>
+              <Download size={16} /> Export CSV
+            </button>
+          </ActionMenu>
+          <button className="refresh" onClick={() => openHolding()}>
+            <Plus size={17} /> Add holding
+          </button>
+        </div>
+      </header>
+      <section
+        className="portfolio-overview"
+        aria-label="Portfolio summary"
+        aria-busy={firstLoad}
+      >
+        {firstLoad ? (
+          <LoadingPlaceholder
+            kind="summary"
+            label="Loading portfolio summary"
+          />
+        ) : (
+          <>
+            <div className="portfolio-total">
+              <span>Total portfolio value</span>
+              <strong>{money(dashboard?.totalValue)}</strong>
+              <p>
+                {dashboard
+                  ? `${dashboard.holdings?.length || 0} holdings · ${money(dashboard.cashBalance)} cash`
+                  : error ? "Your portfolio will appear when the connection is restored." : "Add your holdings to start tracking your portfolio."}
+              </p>
+            </div>
+            <div className="overview-metrics">
+              <StatCard
+                label="Today's change"
+                value={signedMoney(dashboard?.dayValueChange)}
+                sub={signedPct(dashboard?.dayValueChangePercent)}
+                positive={
+                  dashboard
+                    ? Number(dashboard.dayValueChange || 0) >= 0
+                    : undefined
+                }
+              />
+              <StatCard
+                label="Total gain / loss"
+                value={signedMoney(dashboard?.totalGain)}
+                sub={signedPct(dashboard?.totalGainPercent)}
+                positive={
+                  dashboard ? Number(dashboard.totalGain || 0) >= 0 : undefined
+                }
+              />
+              <StatCard
+                label="Total invested"
+                value={money(
+                  dashboard
+                    ? dashboard.totalCost - dashboard.cashBalance
+                    : null,
+                )}
+              />
+            </div>
+          </>
+        )}
+      </section>
+      <div className="data-status" aria-live="polite">
+        <span>
+          {loading ? (
+            "Updating portfolio…"
+          ) : dashboard?.updatedAt ? (
+            <>
+              Updated{" "}
+              <time dateTime={dashboard.updatedAt}>
+                {dateLabel(dashboard.updatedAt)}
+              </time>
+              {error ? " · Showing last available data" : ""}
+            </>
+          ) : (
+            "No portfolio data loaded"
+          )}
+        </span>
+        <button
+          className="text-button"
+          onClick={loadDashboard}
+          disabled={loading}
+        >
+          <RefreshCw size={14} className={loading ? "refreshing" : ""} />
+          {loading ? "Updating" : "Refresh prices"}
+        </button>
+      </div>
+      <RetryNotice error={error} onRetry={loadDashboard} loading={loading} />
+      {unavailableCount > 0 && (
+        <div className="notice quote-warning" role="status">
+          Prices are unavailable for {unavailableCount}{" "}
+          {unavailableCount === 1 ? "holding" : "holdings"}. Totals may be
+          incomplete.{" "}
+          <button onClick={loadDashboard} disabled={loading}>
+            Retry prices
+          </button>
+        </div>
+      )}
+      <div className="tabs-row">
+        <nav className="tabs" aria-label="Dashboard views">
+          {[
+            ["holdings", "Holdings", BriefcaseBusiness],
+            ["breakdown", "Breakdown", BarChart3],
+            ["earnings", "Earnings", CalendarDays],
+            ["news", "News", Newspaper],
+          ].map(([tab, label, Icon]) => (
+            <button
+              key={tab}
+              className={activeTab === tab ? "active" : ""}
+              aria-current={activeTab === tab ? "page" : undefined}
+              onClick={(e) => {
+                setActiveTab(tab);
+                e.currentTarget.scrollIntoView({
+                  block: "nearest",
+                  inline: "nearest",
+                });
+              }}
+            >
+              <Icon size={17} />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+      {activeTab === "holdings" && (
+        <>
+          <PortfolioSnapshotPanel
+            snapshots={dashboard?.snapshots || []}
+            loading={firstLoad}
+            unavailable={!dashboard && !!error}
+          />
+          <section
+            className="holdings-section"
+            aria-label="Your holdings"
+            aria-busy={firstLoad}
+          >
+            <div className="section-heading">
+              <h2>
+                Holdings{" "}
+                <span className="count-badge">
+                  {dashboard?.holdings?.length ?? "—"}
+                </span>
+              </h2>
+              <span>Select a holding to explore</span>
+            </div>
+            <div className="holdings-toolbar">
+              <label className="search-box">
+                <Search size={17} />
+                <input
+                  ref={searchInputRef}
+                  aria-label="Search holdings"
+                  placeholder="Search holdings…"
+                  value={holdingSearch}
+                  onChange={(e) => setHoldingSearch(e.target.value)}
+                />
+                {holdingSearch && (
                   <button
-                    type="button"
-                    key={option.value}
-                    className={sortBy === option.value ? 'selected' : ''}
-                    role="option"
-                    aria-selected={sortBy === option.value}
-                    onClick={() => {
-                      setSortBy(option.value);
-                      setSortOpen(false);
-                    }}
+                    className="clear-search"
+                    onClick={() => setHoldingSearch("")}
+                    aria-label="Clear search"
                   >
-                    {option.label}
+                    <X size={15} />
                   </button>
+                )}
+              </label>
+              <div className="toolbar-actions">
+                <label className="sort-field">
+                  <ArrowUpDown size={15} />
+                  <span className="sr-only">Sort holdings by</span>
+                  <select
+                    aria-label="Sort holdings by"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                  >
+                    {SORT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="sort-direction"
+                  onClick={() =>
+                    setSortDir((v) => (v === "desc" ? "asc" : "desc"))
+                  }
+                  aria-label={
+                    sortDir === "desc" ? "Sort low to high" : "Sort high to low"
+                  }
+                  title={sortDir === "desc" ? "High to low" : "Low to high"}
+                >
+                  {sortDir === "desc" ? "↓" : "↑"}
+                </button>
+                {holdingView === "table" && (
+                  <ActionMenu
+                    className="column-options"
+                    label="Columns"
+                    icon={<Table2 size={16} />}
+                  >
+                    {HOLDING_COLUMNS.map((c) => (
+                      <label key={c.key} className="check-row">
+                        <input
+                          type="checkbox"
+                          checked={visibleColumns.includes(c.key)}
+                          onChange={() => toggleColumn(c.key)}
+                        />
+                        <span>{c.label}</span>
+                      </label>
+                    ))}
+                  </ActionMenu>
+                )}
+                <div
+                  className="segmented view-switch"
+                  role="group"
+                  aria-label="Holdings view"
+                >
+                  <button
+                    className={holdingView === "table" ? "active" : ""}
+                    onClick={() => setHoldingView("table")}
+                    aria-label="Table view"
+                    aria-pressed={holdingView === "table"}
+                    title="Table view"
+                  >
+                    <Table2 size={16} />
+                  </button>
+                  <button
+                    className={holdingView === "cards" ? "active" : ""}
+                    onClick={() => setHoldingView("cards")}
+                    aria-label="Card view"
+                    aria-pressed={holdingView === "cards"}
+                    title="Card view"
+                  >
+                    <LayoutGrid size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            {holdingSearch && (
+              <p className="filter-note" role="status">
+                {sortedHoldings.length} of {dashboard?.holdings?.length || 0}{" "}
+                holdings shown
+              </p>
+            )}
+            {firstLoad ? (
+              <LoadingPlaceholder label="Loading holdings" />
+            ) : !sortedHoldings.length ? (
+              <div className="holdings-empty">
+                <BriefcaseBusiness size={28} />
+                <h3>
+                  {holdingSearch
+                    ? "No matching holdings"
+                    : !dashboard && error ? "Holdings unavailable" : "Add your first holding"}
+                </h3>
+                <p>
+                  {holdingSearch
+                    ? "Try another symbol, company, or sector."
+                    : !dashboard && error ? "Reconnect and retry to load your holdings." : "Add a ticker, shares, and average cost to see your portfolio here."}
+                </p>
+                <button
+                  onClick={() =>
+                    holdingSearch ? setHoldingSearch("") : !dashboard && error ? loadDashboard() : openHolding()
+                  }
+                >
+                  {holdingSearch ? "Clear search" : !dashboard && error ? "Retry" : "Add holding"}
+                </button>
+              </div>
+            ) : holdingView === "cards" ? (
+              <div className="holdings">
+                {sortedHoldings.map((h) => (
+                  <section className="compact-holding-card" key={h.symbol}>
+                    <button
+                      className="holding-link"
+                      onClick={() => setSelectedSymbol(h.symbol)}
+                      aria-label={`View ${h.symbol} details`}
+                    >
+                      <span>
+                        {h.symbol}
+                        <ArrowUpRight size={16} />
+                      </span>
+                      <small>{h.name}</small>
+                    </button>
+                    <strong>{money(h.value)}</strong>
+                    <span
+                      className={Number(h.dayChange || 0) >= 0 ? "good" : "bad"}
+                    >
+                      {signedPct(h.dayChangePercent)} today
+                    </span>
+                    <div className="compact-card-footer">
+                      <span>{num(h.shares)} shares</span>
+                      <button
+                        onClick={() => openHolding(h)}
+                        aria-label={`Edit ${h.symbol}`}
+                      >
+                        <Edit3 size={15} /> Edit
+                      </button>
+                    </div>
+                  </section>
                 ))}
               </div>
+            ) : (
+              <HoldingsTable
+                holdings={sortedHoldings}
+                pinnedSymbols={pinnedSymbols}
+                visibleColumns={visibleColumns}
+                onTogglePin={togglePinned}
+                onEdit={openHolding}
+                onDelete={deleteHolding}
+                onSelect={setSelectedSymbol}
+              />
             )}
-          </div>
-          <button type="button" disabled={activeTab !== 'holdings'} onClick={() => setSortDir(sortDir === 'desc' ? 'asc' : 'desc')}>{sortDir === 'desc' ? 'High to low' : 'Low to high'}</button>
-        </div>
-    </div>
-
-    {activeTab === 'holdings' && (
-      <>
-        <PortfolioSnapshotPanel snapshots={dashboard?.snapshots || []} />
-        <BenchmarkPanel dashboard={dashboard} benchmarks={benchmarks} loading={benchmarkLoading} error={benchmarkError} onRefresh={loadBenchmarks} />
-        <div className="holdings-toolbar">
-          <label className="search-box">
-            <Search size={18}/>
-            <input ref={searchInputRef} placeholder="Search holdings, company, sector..." value={holdingSearch} onChange={e => setHoldingSearch(e.target.value)} />
-          </label>
-          <div className="toolbar-actions">
-            <div className="columns-picker">
-              <button type="button" className="secondary" onClick={() => setColumnsOpen(open => !open)}><Table2 size={17}/> Columns</button>
-              {columnsOpen && (
-                <div className="columns-menu">
-                  {HOLDING_COLUMNS.map(column => (
-                    <label key={column.key} className="check-row">
-                      <input type="checkbox" checked={visibleColumns.includes(column.key)} onChange={() => toggleColumn(column.key)} />
-                      <span>{column.label}</span>
-                    </label>
-                  ))}
+          </section>
+          <details className="benchmark-disclosure">
+            <summary>
+              Compare with the market <ChevronDown size={16} />
+            </summary>
+            <BenchmarkPanel
+              dashboard={dashboard}
+              benchmarks={benchmarks}
+              loading={benchmarkLoading}
+              error={benchmarkError}
+              onRefresh={loadBenchmarks}
+            />
+          </details>
+        </>
+      )}
+      {activeTab === "breakdown" && <BreakdownTab dashboard={dashboard} />}
+      {activeTab === "earnings" && (
+        <EarningsTab
+          dashboard={dashboard}
+          earningsNews={earningsNews}
+          loading={earningsLoading}
+          error={earningsError}
+          onRefresh={loadEarningsNews}
+        />
+      )}
+      {activeTab === "news" && (
+        <NewsTab
+          news={news}
+          loading={newsLoading}
+          error={newsError}
+          onRefresh={loadNews}
+        />
+      )}
+      {dialog && (
+        <Dialog
+          title={
+            dialog === "cash"
+              ? "Edit cash balance"
+              : dialog === "edit"
+                ? "Edit holding"
+                : "Add holding"
+          }
+          onClose={() => setDialog(null)}
+          busy={saving}
+        >
+          <form
+            className="dialog-form"
+            onSubmit={dialog === "cash" ? saveCash : submitHolding}
+          >
+            <p>
+              {dialog === "cash"
+                ? "Include uninvested cash in your total portfolio value."
+                : "Enter your position details. Saving an existing ticker updates that holding."}
+            </p>
+            {dialog === "cash" ? (
+              <label>
+                Cash balance ($)
+                <input
+                  autoFocus
+                  required
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={cashForm}
+                  onChange={(e) => setCashForm(e.target.value)}
+                />
+              </label>
+            ) : (
+              <>
+                <label>
+                  Ticker symbol
+                  <input
+                    autoFocus
+                    required
+                    maxLength={15}
+                    readOnly={dialog === "edit"}
+                    placeholder="e.g. AAPL"
+                    value={form.symbol}
+                    onChange={(e) =>
+                      setForm({ ...form, symbol: e.target.value.toUpperCase() })
+                    }
+                  />
+                </label>
+                <div className="form-pair">
+                  <label>
+                    Shares
+                    <input
+                      required
+                      type="number"
+                      step="any"
+                      min="0.00000001"
+                      value={form.shares}
+                      onChange={(e) =>
+                        setForm({ ...form, shares: e.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Average cost ($)
+                    <input
+                      required
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={form.avgCost}
+                      onChange={(e) =>
+                        setForm({ ...form, avgCost: e.target.value })
+                      }
+                    />
+                  </label>
                 </div>
-              )}
-            </div>
-            <div className="segmented">
-              <button type="button" className={holdingView === 'cards' ? 'active' : ''} onClick={() => setHoldingView('cards')}><LayoutGrid size={17}/> Cards</button>
-              <button type="button" className={holdingView === 'table' ? 'active' : ''} onClick={() => setHoldingView('table')}><Table2 size={17}/> Table</button>
-            </div>
-          </div>
-        </div>
-        {holdingSearch && <div className="filter-note">{sortedHoldings.length} of {dashboard?.holdings?.length || 0} holdings shown</div>}
-        {holdingView === 'cards' ? (
-          <div className="holdings">
-            {sortedHoldings.map(h => <HoldingCard key={h.symbol} holding={h} onDelete={deleteHolding} onUpdate={updateHolding} pinned={pinnedSymbols.includes(h.symbol)} onTogglePin={togglePinned}/>) }
-          </div>
-        ) : (
-          <HoldingsTable holdings={sortedHoldings} pinnedSymbols={pinnedSymbols} visibleColumns={visibleColumns} onTogglePin={togglePinned} onUpdate={updateHolding} onDelete={deleteHolding} />
-        )}
-      </>
-    )}
-
-    {activeTab === 'breakdown' && <BreakdownTab dashboard={dashboard} />}
-
-    {activeTab === 'earnings' && <EarningsTab dashboard={dashboard} earningsNews={earningsNews} loading={earningsLoading} error={earningsError} onRefresh={loadEarningsNews} />}
-
-    {activeTab === 'news' && <NewsTab news={news} loading={newsLoading} error={newsError} onRefresh={loadNews} />}
-    <CommandPalette open={commandOpen} query={commandQuery} actions={commandActions} onQueryChange={setCommandQuery} onClose={() => setCommandOpen(false)} />
-  </main>;
+              </>
+            )}
+            {formError && (
+              <p className="bad" role="alert">
+                {formError}
+              </p>
+            )}
+            <footer>
+              <button
+                type="button"
+                onClick={() => setDialog(null)}
+                disabled={saving}
+              >
+                Cancel
+              </button>
+              <button className="refresh" disabled={saving}>
+                {saving ? "Saving…" : "Save changes"}
+              </button>
+            </footer>
+          </form>
+        </Dialog>
+      )}
+      {selectedHolding && (
+        <Dialog
+          side
+          title={`${selectedHolding.symbol} details`}
+          onClose={() => setSelectedSymbol("")}
+        >
+          <HoldingCard
+            key={selectedHolding.symbol}
+            holding={selectedHolding}
+            expanded
+            onDelete={deleteHolding}
+            onUpdate={updateHolding}
+            pinned={pinnedSymbols.includes(selectedSymbol)}
+            onTogglePin={togglePinned}
+          />
+        </Dialog>
+      )}
+      <CommandPalette
+        open={commandOpen}
+        query={commandQuery}
+        actions={commandActions}
+        onQueryChange={setCommandQuery}
+        onClose={() => {
+          setCommandOpen(false);
+          setCommandQuery("");
+        }}
+      />
+    </main>
+  );
 }
-
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById("root")).render(<App />);
