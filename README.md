@@ -79,6 +79,16 @@ You can also add/update/remove holdings in the website UI.
 
 The backend stores holdings in `backend/src/portfolio.json`, settings in `backend/src/settings.json`, and portfolio history in `backend/src/snapshots.json`. These local files and the machine-specific `Start-App.bat` launcher are excluded from Git. The repository includes `.example` files for setting up a new installation.
 
+## Importing a portfolio screenshot
+
+Choose **Manage → Import screenshot**, then paste an image with Ctrl+V, drop it into the dialog, or select a PNG, JPEG, or WebP file (up to 10 MB).
+
+The app recognizes English text locally in the browser using [Tesseract.js](https://github.com/naptha/tesseract.js). The OCR worker, engine, and English model are served by the app and prepared automatically by `npm run dev` and `npm run build`. No API key or paid recognition service is required. Screenshot pixels and recognized text are not uploaded or saved to the portfolio files.
+
+Review and edit the tickers, share quantities, and average costs before confirming. Column mapping can be adjusted for different table layouts; unsupported layouts can be entered manually. Recognition accuracy depends on the screenshot, so this does not guarantee automatic extraction from every brokerage layout.
+
+Only selected holdings are merged into the portfolio. Existing positions outside the screenshot and cash are preserved. A missing average cost keeps an existing holding's saved cost; a new holding needs an average cost. Current market prices are not treated as purchase costs. Costs use USD; convert non-USD costs before importing.
+
 ## Notes about predictions
 
 The prediction is intentionally simple: it uses the last ~45 trading days and fits a basic linear trend forward 7 days. It is useful as a demo feature, but it should not be used to make investment decisions.

@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import yahooFinance from 'yahoo-finance2';
+import { mergePortfolio } from './portfolioImport.js';
 
 dotenv.config();
 if (typeof yahooFinance.suppressNotices === 'function') {
@@ -737,6 +738,20 @@ app.get('/api/earnings', async (_, res) => {
     res.json({ updatedAt: new Date().toISOString(), reports });
   } catch (error) {
     res.status(500).json({ error: error.message || 'Could not load latest earnings reports.' });
+  }
+});
+app.post('/api/portfolio/merge', async (req, res) => {
+  let portfolio;
+  try {
+    portfolio = mergePortfolio(await loadPortfolio(), req.body?.holdings);
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Could not import holdings.' });
+  }
+  try {
+    await savePortfolio(portfolio);
+    res.json({ holdings: portfolio });
+  } catch {
+    res.status(500).json({ error: 'Could not save portfolio. Please try again.' });
   }
 });
 app.post('/api/portfolio', async (req, res) => {

@@ -4,6 +4,7 @@ import { Area, AreaChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContaine
 import { BarChart3, BriefcaseBusiness, CalendarDays, Command, Download, Edit3, ExternalLink, LayoutGrid, Moon, Newspaper, Plus, RefreshCw, Save, Search, ShieldAlert, Star, Sun, Table2, Trash2, Upload, Wallet, X, ChevronDown, MoreHorizontal, ArrowUpDown, ArrowUpRight } from 'lucide-react';
 import './style.css';
 import { portfolioHistory } from './portfolioHistory.js';
+import ScreenshotImport from './ScreenshotImport.jsx';
 
 const API = import.meta.env.VITE_API_URL ?? 'http://localhost:5000';
 const COLORS = ['var(--blue)', 'var(--green)', 'var(--warning)', 'var(--red)', 'var(--purple)', 'var(--teal)', 'var(--orange)', 'var(--text-soft)'];
@@ -640,14 +641,14 @@ function HoldingCard({
   );
 }
 
-function Dialog({ title, children, onClose, side = false, busy = false }) {
+function Dialog({ title, children, onClose, side = false, busy = false, className = "" }) {
   const ref = useRef(null);
   useEffect(() => {
     const node = ref.current;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     node.showModal();
-    node.querySelector("input:not([readonly])")?.focus();
+    node.querySelector("[data-autofocus], input:not([readonly]):not([type=file])")?.focus();
     return () => {
       node.close();
       document.body.style.overflow = overflow;
@@ -656,7 +657,7 @@ function Dialog({ title, children, onClose, side = false, busy = false }) {
   return (
     <dialog
       ref={ref}
-      className={side ? "app-dialog detail-drawer" : "app-dialog"}
+      className={["app-dialog", side ? "detail-drawer" : "", className].filter(Boolean).join(" ")}
       aria-label={title}
       onCancel={(e) => {
         e.preventDefault();
@@ -1808,6 +1809,8 @@ function App() {
   const [sortBy, setSortBy] = useState("value");
   const [sortDir, setSortDir] = useState("desc");
   const [dialog, setDialog] = useState(null);
+  const [screenshotOpen, setScreenshotOpen] = useState(false);
+  const [screenshotSaving, setScreenshotSaving] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -2102,6 +2105,18 @@ function App() {
     );
   }
 
+  async function importScreenshot(holdings) {
+    const res = await fetchWithTimeout(`${API}/api/portfolio/merge`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ holdings })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not import holdings. Please try again.");
+    setScreenshotOpen(false);
+    setNews(null); setNewsError(""); setEarningsNews(null); setEarningsError("");
+    setBenchmarks(null); setBenchmarkError("");
+    void loadDashboard();
+  }
+
   async function importJson(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -2160,6 +2175,7 @@ function App() {
     });
   }
   const commandActions = [
+    { label: "Import screenshot", run: () => setScreenshotOpen(true) },
     { label: "Add holding", run: () => openHolding() },
     {
       label: "Edit cash balance",
@@ -2235,6 +2251,7 @@ function App() {
             onChange={importJson}
           />
           <ActionMenu label="Manage">
+            <button onClick={() => setScreenshotOpen(true)}><Upload size={16}/> Import screenshot</button>
             <button
               onClick={() => {
                 setCashForm(dashboard?.cashBalance ?? "");
@@ -2245,7 +2262,7 @@ function App() {
               <Wallet size={16} /> Edit cash balance
             </button>
             <button onClick={() => importInputRef.current?.click()}>
-              <Upload size={16} /> Import portfolio
+              <Upload size={16} /> Import JSON
             </button>
             <button onClick={exportJson} disabled={!dashboard}>
               <Download size={16} /> Export JSON
@@ -2592,6 +2609,9 @@ function App() {
           onRefresh={loadNews}
         />
       )}
+      {screenshotOpen && <Dialog title="Import screenshot" className="screenshot-dialog" busy={screenshotSaving} onClose={() => setScreenshotOpen(false)}>
+        <ScreenshotImport existingHoldings={dashboard?.holdings || []} onImport={importScreenshot} onBusyChange={setScreenshotSaving}/>
+      </Dialog>}
       {dialog && (
         <Dialog
           title={

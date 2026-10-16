@@ -10,3 +10,6 @@ backend/src/snapshots.json
 
 # Machine-specific launch scripts with local Windows paths
 Start-App.bat
+
+# Generated local OCR engine and language data
+frontend/public/ocr/
